@@ -1,0 +1,1371 @@
+-- Stylish FinderMenu v2
+
+-- ========== CONFIG ==========
+local PALLET_NAME = "Palletwrong"
+local GEN_NAME = "Generator"
+local PALLET_COLOR = Color3.fromRGB(0, 140, 255)
+local GEN_COLOR = Color3.fromRGB(255, 230, 0)
+local PLAYER_COLOR = Color3.fromRGB(0, 255, 0)
+local KILLER_COLOR = Color3.fromRGB(255, 0, 0)
+local DEFAULT_SCAN_INTERVAL = 6
+
+-- ========== SERVICES ==========
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+local player = Players.LocalPlayer
+
+-- ========== STATE ==========
+local scanInterval = DEFAULT_SCAN_INTERVAL
+local currentTheme = "Dark" -- Dark | Light | Neon
+local binds = {} -- btn -> KeyCode
+local keyToButtons = {} -- KeyCode.Name -> {btn,...}
+local createdButtons = {} -- {name, btn, get, set, bindLabel}
+local nightModeEnabled = false -- Состояние ночного режима
+
+-- Настройки подсветок
+local highlightSettings = {
+    palletFillTransparency = 0.3,
+    palletOutlineTransparency = 0,
+    genFillTransparency = 0.3,
+    genOutlineTransparency = 0,
+    playerFillTransparency = 0.3,
+    playerOutlineTransparency = 0,
+    killerFillTransparency = 0.3,
+    killerOutlineTransparency = 0
+}
+
+-- small safe tween helper
+local function tween(obj, props, time, style, dir)
+    local info = TweenInfo.new(time or 0.18, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out)
+    local t = TweenService:Create(obj, info, props)
+    t:Play()
+    return t
+end
+
+-- ========== GUI (stylish) ==========
+local gui = Instance.new("ScreenGui")
+gui.Name = "FinderMenu"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+-- root frame (slightly wider and modern)
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 320, 0, 560) -- Increased height for new button
+frame.Position = UDim2.new(0.03, 0, 0.18, 0)
+frame.BackgroundColor3 = Color3.fromRGB(18,18,20)
+frame.BackgroundTransparency = 0
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 14)
+
+-- soft shadow (ImageLabel)
+local shadow = Instance.new("ImageLabel")
+shadow.Parent = frame
+shadow.ZIndex = -1
+shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+shadow.Position = UDim2.new(0.5, 0.5, 0.5, 0)
+shadow.Size = UDim2.new(1, 60, 1, 60)
+shadow.Image = "rbxassetid://1316045217"
+shadow.BackgroundTransparency = 1
+shadow.ImageTransparency = 0.45
+
+-- gradient header
+local header = Instance.new("Frame", frame)
+header.Size = UDim2.new(1, 0, 0, 56)
+header.Position = UDim2.new(0, 0, 0, 0)
+header.BackgroundTransparency = 1
+
+local headerBg = Instance.new("Frame", header)
+headerBg.Size = UDim2.new(1, 0, 1, 0)
+headerBg.Position = UDim2.new(0,0,0,0)
+headerBg.BackgroundColor3 = Color3.fromRGB(28,28,30)
+headerBg.BorderSizePixel = 0
+Instance.new("UICorner", headerBg).CornerRadius = UDim.new(0, 14)
+
+local grad = Instance.new("UIGradient", headerBg)
+grad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(50,50,80)), ColorSequenceKeypoint.new(1, Color3.fromRGB(22,22,28))})
+grad.Rotation = 90
+
+local title = Instance.new("TextLabel", headerBg)
+title.Size = UDim2.new(0.7, -10, 1, -6)
+title.Position = UDim2.new(0, 12, 0, 3)
+title.BackgroundTransparency = 1
+title.Text = "Object Finder"
+title.TextColor3 = Color3.fromRGB(230,230,230)
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.TextXAlignment = Enum.TextXAlignment.Left
+
+-- small subtitle
+local sub = Instance.new("TextLabel", headerBg)
+sub.Size = UDim2.new(0.3, -12, 1, -6)
+sub.Position = UDim2.new(0.7, 10, 0, 3)
+sub.BackgroundTransparency = 1
+sub.Text = "v2 stylish"
+sub.TextColor3 = Color3.fromRGB(170,170,170)
+sub.TextScaled = true
+sub.Font = Enum.Font.Gotham
+sub.TextXAlignment = Enum.TextXAlignment.Right
+
+-- container for content
+local content = Instance.new("Frame", frame)
+content.Size = UDim2.new(1, -20, 1, -80)
+content.Position = UDim2.new(0, 10, 0, 70)
+content.BackgroundTransparency = 1
+
+-- rounded background for content
+local contentBg = Instance.new("Frame", content)
+contentBg.Size = UDim2.new(1, 0, 1, 0)
+contentBg.Position = UDim2.new(0,0,0,0)
+contentBg.BackgroundColor3 = Color3.fromRGB(22,22,24)
+contentBg.BorderSizePixel = 0
+Instance.new("UICorner", contentBg).CornerRadius = UDim.new(0, 10)
+
+-- subtle inner glow (gradient)
+local innerGrad = Instance.new("UIGradient", contentBg)
+innerGrad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(28,28,32)), ColorSequenceKeypoint.new(1, Color3.fromRGB(18,18,20))})
+innerGrad.Rotation = 90
+innerGrad.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 0)})
+
+-- helper to create button rows with bind label
+local function createRow(y)
+    local btn = Instance.new("TextButton", contentBg)
+    btn.Size = UDim2.new(0.66, -10, 0, 36)
+    btn.Position = UDim2.new(0, 10, 0, y)
+    btn.BackgroundColor3 = Color3.fromRGB(38,38,40)
+    btn.BorderSizePixel = 0
+    btn.AutoButtonColor = false
+    btn.TextColor3 = Color3.fromRGB(240,240,240)
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
+
+    local bindLabel = Instance.new("TextLabel", contentBg)
+    bindLabel.Size = UDim2.new(0.28, -10, 0, 24)
+    bindLabel.Position = UDim2.new(0.68, 10, 0, y + 6)
+    bindLabel.BackgroundColor3 = Color3.fromRGB(30,30,32)
+    bindLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    bindLabel.TextScaled = true
+    bindLabel.Text = "Bind: -"
+    bindLabel.Font = Enum.Font.Gotham
+    Instance.new("UICorner", bindLabel).CornerRadius = UDim.new(0,8)
+
+    return btn, bindLabel
+end
+
+-- create rows (matching original layout order)
+local y = 12
+local palletBtn, palletBind = createRow(y); y = y + 44
+local genBtn, genBind = createRow(y); y = y + 44
+local playersBtn, playersBind = createRow(y); y = y + 44
+local killerBtn, killerBind = createRow(y); y = y + 44
+local collisionBtn, collisionBind = createRow(y); y = y + 44
+local jumpBtn, jumpBind = createRow(y); y = y + 44
+local nightModeBtn, nightModeBind = createRow(y); y = y + 44 -- Новая кнопка ночного режима
+
+-- teleport & settings & close buttons (full-width look)
+local function createFullButton(text, posY, color)
+    local b = Instance.new("TextButton", contentBg)
+    b.Size = UDim2.new(1, -20, 0, 36)
+    b.Position = UDim2.new(0, 10, 0, posY)
+    b.BackgroundColor3 = color or Color3.fromRGB(70,70,90)
+    b.BorderSizePixel = 0
+    b.Text = text
+    b.TextScaled = true
+    b.Font = Enum.Font.Gotham
+    b.TextColor3 = Color3.fromRGB(245,245,245)
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
+    return b
+end
+
+local tpBtn = createFullButton("Телепорт к игрокам", y + 4, Color3.fromRGB(70,70,120)); y = y + 44
+local settingsBtn = createFullButton("Настройки", y + 4, Color3.fromRGB(80,50,50)); y = y + 44
+local highlightSettingsBtn = createFullButton("Настройки подсветок", y + 4, Color3.fromRGB(50,80,50)); y = y + 44 -- Новая кнопка
+local closeBtn = createFullButton("Закрыть меню", y + 4, Color3.fromRGB(140,30,30)); y = y + 44
+
+-- tooltip small label for explaining right-click
+local hint = Instance.new("TextLabel", contentBg)
+hint.Size = UDim2.new(1, -20, 0, 20)
+hint.Position = UDim2.new(0, 10, 0, y + 4)
+hint.BackgroundTransparency = 1
+hint.Text = "Правая кнопка мыши по кнопке — привязать клавишу | Backspace — удалить привязку"
+hint.TextColor3 = Color3.fromRGB(170,170,170)
+hint.TextScaled = true
+hint.Font = Enum.Font.Gotham
+
+-- ========== BUTTON LOGIC + BIND UI ==========
+
+-- helper to set bind label for a button
+local function setBind(btn, label)
+    local k = binds[btn]
+    if k then
+        label.Text = "Bind: " .. tostring(k.Name)
+    else
+        label.Text = "Bind: -"
+    end
+end
+
+-- right-click binding behavior (generic)
+local function enableBinding(btn, label)
+    btn.MouseButton2Click:Connect(function()
+        -- show a small temporary overlay on the button to indicate waiting for key
+        local overlay = Instance.new("TextLabel", btn)
+        overlay.Size = UDim2.new(1, 0, 1, 0)
+        overlay.Position = UDim2.new(0, 0, 0, 0)
+        overlay.BackgroundTransparency = 0.15
+        overlay.BackgroundColor3 = Color3.fromRGB(10,10,12)
+        overlay.Text = "Нажмите клавишу..."
+        overlay.TextScaled = true
+        overlay.TextColor3 = Color3.fromRGB(255,255,255)
+        overlay.Font = Enum.Font.GothamSemibold
+        Instance.new("UICorner", overlay).CornerRadius = UDim.new(0,8)
+
+        local conn
+        conn = UserInputService.InputBegan:Connect(function(input, gp)
+            if gp then return end
+            if input.UserInputType == Enum.UserInputType.Keyboard then
+                local kc = input.KeyCode
+                -- delete bind with Backspace/Delete
+                if kc == Enum.KeyCode.Backspace or kc == Enum.KeyCode.Delete then
+                    -- remove old mapping for this btn
+                    if binds[btn] then
+                        local old = binds[btn]
+                        local list = keyToButtons[old.Name]
+                        if list then
+                            for i,v in ipairs(list) do
+                                if v == btn then table.remove(list, i); break end
+                            end
+                        end
+                        binds[btn] = nil
+                    end
+                    overlay.Text = "Привязка удалена"
+                    setBind(btn, label)
+                    task.delay(0.6, function()
+                        if overlay and overlay.Parent then overlay:Destroy() end
+                    end)
+                    conn:Disconnect()
+                    return
+                end
+                
+                -- store bind
+                if binds[btn] then
+                    local old = binds[btn]
+                    local list = keyToButtons[old.Name]
+                    if list then
+                        for i,v in ipairs(list) do
+                            if v == btn then table.remove(list, i); break end
+                        end
+                    end
+                end
+                binds[btn] = kc
+                keyToButtons[kc.Name] = keyToButtons[kc.Name] or {}
+                table.insert(keyToButtons[kc.Name], btn)
+                overlay.Text = "Привязано: " .. kc.Name
+                setBind(btn, label)
+                task.delay(0.8, function()
+                    if overlay and overlay.Parent then overlay:Destroy() end
+                end)
+                conn:Disconnect()
+            elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+                overlay.Text = "Отменено"
+                task.delay(0.4, function()
+                    if overlay and overlay.Parent then overlay:Destroy() end
+                end)
+                conn:Disconnect()
+            end
+        end)
+    end)
+end
+
+-- Функция для переключения ночного режима
+local function toggleNightMode()
+    nightModeEnabled = not nightModeEnabled
+    if nightModeEnabled then
+        -- Включаем светлую карту
+        Lighting.Ambient = Color3.new(0.8, 0.8, 0.8) -- Светлый ambient
+        Lighting.Brightness = 2 -- Увеличиваем яркость
+        Lighting.ClockTime = 14 -- Дневное время
+        Lighting.GeographicLatitude = 45 -- Умеренная широта для нормального освещения
+        Lighting.OutdoorAmbient = Color3.new(0.7, 0.7, 0.7) -- Светлый outdoor ambient
+        
+        -- Настройки для светлого неба
+        if Lighting:FindFirstChild("Sky") then
+            Lighting.Sky.SkyboxBk = "rbxassetid://9851144466" -- Голубое небо
+            Lighting.Sky.SkyboxDn = "rbxassetid://9851143246"
+            Lighting.Sky.SkyboxFt = "rbxassetid://9851144466"
+            Lighting.Sky.SkyboxLf = "rbxassetid://9851144466"
+            Lighting.Sky.SkyboxRt = "rbxassetid://9851144466"
+            Lighting.Sky.SkyboxUp = "rbxassetid://9851142093"
+        end
+        
+        -- Уменьшаем тени для более светлого вида
+        Lighting.ShadowSoftness = 0.1
+    else
+        -- Возвращаем стандартные настройки
+        Lighting.Ambient = Color3.new(0.5, 0.5, 0.5)
+        Lighting.Brightness = 1
+        Lighting.ClockTime = 14
+        Lighting.GeographicLatitude = 41.28
+        Lighting.OutdoorAmbient = Color3.new(0.5, 0.5, 0.5)
+        Lighting.ShadowSoftness = 0.5
+        
+        -- Возвращаем стандартное небо
+        if Lighting:FindFirstChild("Sky") then
+            Lighting.Sky.SkyboxBk = "rbxassetid://7018684000"
+            Lighting.Sky.SkyboxDn = "rbxassetid://6334928194"
+            Lighting.Sky.SkyboxFt = "rbxassetid://7018684000"
+            Lighting.Sky.SkyboxLf = "rbxassetid://7018684000"
+            Lighting.Sky.SkyboxRt = "rbxassetid://7018684000"
+            Lighting.Sky.SkyboxUp = "rbxassetid://7018689553"
+        end
+    end
+end
+
+-- create internal toggle state (getter/setter) and link to UI
+local function createToggleLogic(btn, label, name)
+    local state = false
+    local function updateVisual()
+        if state then
+            btn.BackgroundColor3 = Color3.fromRGB(60, 110, 60)
+            btn.Text = name .. ": ON"
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(38,38,40)
+            btn.Text = name .. ": OFF"
+        end
+    end
+    
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        updateVisual()
+    end)
+    
+    -- right click binding
+    enableBinding(btn, label)
+    setBind(btn, label)
+    
+    -- store in createdButtons for external access
+    table.insert(createdButtons, {name = name, btn = btn, get = function() return state end, set = function(v) state = v; updateVisual() end, bindLabel = label})
+    updateVisual()
+end
+
+-- Специальная логика для кнопки ночного режима
+local function createNightModeToggleLogic(btn, label, name)
+    local state = false
+    local function updateVisual()
+        if state then
+            btn.BackgroundColor3 = Color3.fromRGB(80, 130, 210) -- Синий цвет для ночного режима
+            btn.Text = name .. ": ON"
+        else
+            btn.BackgroundColor3 = Color3.fromRGB(38,38,40)
+            btn.Text = name .. ": OFF"
+        end
+    end
+    
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        updateVisual()
+        toggleNightMode() -- Вызываем функцию переключения ночного режима
+    end)
+    
+    -- right click binding
+    enableBinding(btn, label)
+    setBind(btn, label)
+    
+    -- store in createdButtons for external access
+    table.insert(createdButtons, {name = name, btn = btn, get = function() return state end, set = function(v) state = v; updateVisual() end, bindLabel = label})
+    updateVisual()
+end
+
+createToggleLogic(palletBtn, palletBind, "Палеты")
+createToggleLogic(genBtn, genBind, "Генераторы")
+createToggleLogic(playersBtn, playersBind, "Игроки")
+createToggleLogic(killerBtn, killerBind, "Убийца")
+createToggleLogic(collisionBtn, collisionBind, "Коллизия")
+createToggleLogic(jumpBtn, jumpBind, "Прыжок")
+createNightModeToggleLogic(nightModeBtn, nightModeBind, "Ночной режим") -- Новая кнопка
+
+-- ========== TELEPORT UI (TP FRAME) ==========
+local tpFrame = Instance.new("Frame", frame)
+tpFrame.Size = UDim2.new(0, 260, 0, 320)
+tpFrame.Position = UDim2.new(0, 10, 0, 1000) -- hidden below
+tpFrame.BackgroundColor3 = Color3.fromRGB(14,14,16)
+tpFrame.BorderSizePixel = 0
+Instance.new("UICorner", tpFrame).CornerRadius = UDim.new(0,10)
+tpFrame.Visible = false
+
+local tpTitle = Instance.new("TextLabel", tpFrame)
+tpTitle.Size = UDim2.new(1, -16, 0, 30)
+tpTitle.Position = UDim2.new(0, 8, 0, 8)
+tpTitle.BackgroundTransparency = 1
+tpTitle.Text = "Телепорт к игрокам"
+tpTitle.TextColor3 = Color3.fromRGB(230,230,230)
+tpTitle.TextScaled = true
+tpTitle.Font = Enum.Font.GothamBold
+
+local tpScroll = Instance.new("ScrollingFrame", tpFrame)
+tpScroll.Size = UDim2.new(1, -16, 1, -52)
+tpScroll.Position = UDim2.new(0, 8, 0, 44)
+tpScroll.CanvasSize = UDim2.new(0,0,0,0)
+tpScroll.ScrollBarThickness = 6
+tpScroll.BackgroundTransparency = 1
+
+local tpLayout = Instance.new("UIListLayout", tpScroll)
+tpLayout.Padding = UDim.new(0,6)
+
+local function isKiller(plr)
+    if not plr then return false end
+    if plr:FindFirstChild("Backpack") and plr.Backpack:FindFirstChild("Weapon") then return true end
+    if plr.Character and plr.Character:FindFirstChild("Weapon") then return true end
+    if plr.Character then
+        for _,c in ipairs(plr.Character:GetChildren()) do
+            if c:IsA("Tool") then return true end
+        end
+    end
+    return false
+end
+
+local function refreshTPList()
+    for _,child in ipairs(tpScroll:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    local players = Players:GetPlayers()
+    for _,plr in ipairs(players) do
+        if plr ~= player then
+            local b = Instance.new("TextButton", tpScroll)
+            b.Size = UDim2.new(1, -8, 0, 30)
+            b.BackgroundColor3 = Color3.fromRGB(30,30,30)
+            b.TextScaled = true
+            b.Font = Enum.Font.Gotham
+            b.Text = plr.Name
+            b.TextColor3 = isKiller(plr) and KILLER_COLOR or PLAYER_COLOR
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+            
+            b.MouseButton1Click:Connect(function()
+                if player.Character and plr.Character then
+                    local ok = pcall(function()
+                        player.Character:PivotTo(plr.Character:GetPivot() + Vector3.new(0,2,0))
+                    end)
+                    if not ok then
+                        if player.Character.PrimaryPart and plr.Character.PrimaryPart then
+                            player.Character:SetPrimaryPartCFrame(plr.Character.PrimaryPart.CFrame + Vector3.new(0,2,0))
+                        end
+                    end
+                end
+            end)
+        end
+    end
+    tpScroll.CanvasSize = UDim2.new(0,0,0,#Players:GetPlayers()*36)
+end
+
+-- toggle TP frame with animation
+local tpOpen = false
+tpBtn.MouseButton1Click:Connect(function()
+    tpOpen = not tpOpen
+    if tpOpen then
+        tpFrame.Visible = true
+        tpFrame.Position = UDim2.new(0, 10, 0, 600)
+        tween(tpFrame, {Position = UDim2.new(0, 10, 0, 120)}, 0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        refreshTPList()
+    else
+        tween(tpFrame, {Position = UDim2.new(0, 10, 0, 600)}, 0.12)
+        task.delay(0.12, function()
+            if tpFrame then tpFrame.Visible = false end
+        end)
+    end
+end)
+
+Players.PlayerAdded:Connect(refreshTPList)
+Players.PlayerRemoving:Connect(refreshTPList)
+
+-- ========== SETTINGS FRAME ==========
+local settingsFrame = Instance.new("Frame", frame)
+settingsFrame.Size = UDim2.new(0, 260, 0, 170)
+settingsFrame.Position = UDim2.new(0, 10, 0, 1000)
+settingsFrame.BackgroundColor3 = Color3.fromRGB(14,14,16)
+settingsFrame.BorderSizePixel = 0
+Instance.new("UICorner", settingsFrame).CornerRadius = UDim.new(0,8)
+settingsFrame.Visible = false
+
+local sTitle = Instance.new("TextLabel", settingsFrame)
+sTitle.Size = UDim2.new(1, -16, 0, 28)
+sTitle.Position = UDim2.new(0, 8, 0, 8)
+sTitle.BackgroundTransparency = 1
+sTitle.Text = "Настройки"
+sTitle.TextColor3 = Color3.fromRGB(230,230,230)
+sTitle.TextScaled = true
+sTitle.Font = Enum.Font.GothamBold
+
+-- theme buttons
+local thLabel = Instance.new("TextLabel", settingsFrame)
+thLabel.Size = UDim2.new(1, -16, 0, 20)
+thLabel.Position = UDim2.new(0, 8, 0, 40)
+thLabel.BackgroundTransparency = 1
+thLabel.Text = "Тема:"
+thLabel.TextColor3 = Color3.fromRGB(180,180,180)
+thLabel.TextScaled = true
+thLabel.Font = Enum.Font.Gotham
+
+local function smallBtn(parent, txt, posX)
+    local b = Instance.new("TextButton", parent)
+    b.Size = UDim2.new(0, 72, 0, 28)
+    b.Position = UDim2.new(0, posX, 0, 64)
+    b.Text = txt
+    b.TextScaled = true
+    b.Font = Enum.Font.Gotham
+    b.TextColor3 = Color3.fromRGB(240,240,240)
+    b.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+    return b
+end
+
+local darkBtn = smallBtn(settingsFrame, "Dark", 0.04)
+local lightBtn = smallBtn(settingsFrame, "Light", 0.30)
+local neonBtn = smallBtn(settingsFrame, "Neon", 0.56)
+
+darkBtn.MouseButton1Click:Connect(function()
+    currentTheme = "Dark"
+    frame.BackgroundColor3 = Color3.fromRGB(18,18,20)
+    contentBg.BackgroundColor3 = Color3.fromRGB(22,22,24)
+    title.TextColor3 = Color3.fromRGB(230,230,230)
+end)
+
+lightBtn.MouseButton1Click:Connect(function()
+    currentTheme = "Light"
+    frame.BackgroundColor3 = Color3.fromRGB(245,245,245)
+    contentBg.BackgroundColor3 = Color3.fromRGB(240,240,240)
+    title.TextColor3 = Color3.fromRGB(20,20,20)
+end)
+
+neonBtn.MouseButton1Click:Connect(function()
+    currentTheme = "Neon"
+    frame.BackgroundColor3 = Color3.fromRGB(30,4,40)
+    contentBg.BackgroundColor3 = Color3.fromRGB(22,12,30)
+    title.TextColor3 = Color3.fromRGB(255,220,255)
+end)
+
+-- scan interval UI
+local scanLabel = Instance.new("TextLabel", settingsFrame)
+scanLabel.Size = UDim2.new(0.58, -12, 0, 20)
+scanLabel.Position = UDim2.new(0, 8, 0, 108)
+scanLabel.BackgroundTransparency = 1
+scanLabel.Text = "Интервал сканирования (с):"
+scanLabel.TextColor3 = Color3.fromRGB(180,180,180)
+scanLabel.TextScaled = true
+scanLabel.Font = Enum.Font.Gotham
+
+local scanBox = Instance.new("TextBox", settingsFrame)
+scanBox.Size = UDim2.new(0.34, -12, 0, 26)
+scanBox.Position = UDim2.new(0.62, 0, 0, 106)
+scanBox.Text = tostring(scanInterval)
+scanBox.ClearTextOnFocus = false
+scanBox.TextScaled = true
+Instance.new("UICorner", scanBox).CornerRadius = UDim.new(0,6)
+
+scanBox.FocusLost:Connect(function(enter)
+    local v = tonumber(scanBox.Text)
+    if v and v >= 0.1 then
+        scanInterval = v
+        scanBox.Text = tostring(scanInterval)
+    else
+        scanBox.Text = tostring(scanInterval)
+    end
+end)
+
+settingsBtn.MouseButton1Click:Connect(function()
+    settingsFrame.Visible = not settingsFrame.Visible
+    if settingsFrame.Visible then
+        settingsFrame.Position = UDim2.new(0, 10, 0, 120)
+        tween(settingsFrame, {Position = UDim2.new(0, 10, 0, 120)}, 0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    else
+        tween(settingsFrame, {Position = UDim2.new(0, 10, 0, 1000)}, 0.12)
+        task.delay(0.12, function()
+            if settingsFrame then settingsFrame.Visible = false end
+        end)
+    end
+end)
+
+-- ========== HIGHLIGHT SETTINGS FRAME ==========
+local highlightSettingsFrame = Instance.new("Frame", frame)
+highlightSettingsFrame.Size = UDim2.new(0, 280, 0, 380)
+highlightSettingsFrame.Position = UDim2.new(0, 10, 0, 1000)
+highlightSettingsFrame.BackgroundColor3 = Color3.fromRGB(14,14,16)
+highlightSettingsFrame.BorderSizePixel = 0
+Instance.new("UICorner", highlightSettingsFrame).CornerRadius = UDim.new(0,8)
+highlightSettingsFrame.Visible = false
+
+local hsTitle = Instance.new("TextLabel", highlightSettingsFrame)
+hsTitle.Size = UDim2.new(1, -16, 0, 28)
+hsTitle.Position = UDim2.new(0, 8, 0, 8)
+hsTitle.BackgroundTransparency = 1
+hsTitle.Text = "Настройки подсветок"
+hsTitle.TextColor3 = Color3.fromRGB(230,230,230)
+hsTitle.TextScaled = true
+hsTitle.Font = Enum.Font.GothamBold
+
+local hsScroll = Instance.new("ScrollingFrame", highlightSettingsFrame)
+hsScroll.Size = UDim2.new(1, -16, 1, -52)
+hsScroll.Position = UDim2.new(0, 8, 0, 44)
+hsScroll.CanvasSize = UDim2.new(0,0,0,600)
+hsScroll.ScrollBarThickness = 6
+hsScroll.BackgroundTransparency = 1
+
+local hsLayout = Instance.new("UIListLayout", hsScroll)
+hsLayout.Padding = UDim.new(0,8)
+
+-- Функция для создания слайдера настройки
+local function createHighlightSlider(settingName, displayName, defaultValue, yPos)
+    local container = Instance.new("Frame", hsScroll)
+    container.Size = UDim2.new(1, 0, 0, 60)
+    container.BackgroundTransparency = 1
+    
+    local label = Instance.new("TextLabel", container)
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.Position = UDim2.new(0, 0, 0, 0)
+    label.BackgroundTransparency = 1
+    label.Text = displayName
+    label.TextColor3 = Color3.fromRGB(200,200,200)
+    label.TextScaled = true
+    label.Font = Enum.Font.Gotham
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    
+    local valueLabel = Instance.new("TextLabel", container)
+    valueLabel.Size = UDim2.new(0, 40, 0, 20)
+    valueLabel.Position = UDim2.new(1, -40, 0, 0)
+    valueLabel.BackgroundTransparency = 1
+    valueLabel.Text = tostring(highlightSettings[settingName])
+    valueLabel.TextColor3 = Color3.fromRGB(150,150,255)
+    valueLabel.TextScaled = true
+    valueLabel.Font = Enum.Font.GothamBold
+    
+    local slider = Instance.new("Frame", container)
+    slider.Size = UDim2.new(1, 0, 0, 20)
+    slider.Position = UDim2.new(0, 0, 0, 30)
+    slider.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    Instance.new("UICorner", slider).CornerRadius = UDim.new(0,4)
+    
+    local fill = Instance.new("Frame", slider)
+    fill.Size = UDim2.new(highlightSettings[settingName], 0, 1, 0)
+    fill.Position = UDim2.new(0,0,0,0)
+    fill.BackgroundColor3 = Color3.fromRGB(80,120,255)
+    fill.BorderSizePixel = 0
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(0,4)
+    
+    local sliderBtn = Instance.new("TextButton", slider)
+    sliderBtn.Size = UDim2.new(1,0,1,0)
+    sliderBtn.BackgroundTransparency = 1
+    sliderBtn.Text = ""
+    
+    sliderBtn.MouseButton1Down:Connect(function()
+        local connection
+        connection = RunService.RenderStepped:Connect(function()
+            local mouse = UserInputService:GetMouseLocation()
+            local sliderAbsPos = slider.AbsolutePosition
+            local sliderAbsSize = slider.AbsoluteSize
+            
+            local relativeX = (mouse.X - sliderAbsPos.X) / sliderAbsSize.X
+            relativeX = math.clamp(relativeX, 0, 1)
+            
+            highlightSettings[settingName] = relativeX
+            valueLabel.Text = string.format("%.2f", relativeX)
+            fill.Size = UDim2.new(relativeX, 0, 1, 0)
+        end)
+        
+        local function disconnect()
+            connection:Disconnect()
+            UserInputService.MouseButton1Up:Wait()
+        end
+        disconnect()
+    end)
+    
+    return container
+end
+
+-- Создаем слайдеры для настроек подсветок
+createHighlightSlider("palletFillTransparency", "Палеты: прозрачность заливки", 0.3, 0)
+createHighlightSlider("palletOutlineTransparency", "Палеты: прозрачность контура", 0, 70)
+createHighlightSlider("genFillTransparency", "Генераторы: прозрачность заливки", 0.3, 140)
+createHighlightSlider("genOutlineTransparency", "Генераторы: прозрачность контура", 0, 210)
+createHighlightSlider("playerFillTransparency", "Игроки: прозрачность заливки", 0.3, 280)
+createHighlightSlider("playerOutlineTransparency", "Игроки: прозрачность контура", 0, 350)
+createHighlightSlider("killerFillTransparency", "Убийца: прозрачность заливки", 0.3, 420)
+createHighlightSlider("killerOutlineTransparency", "Убийца: прозрачность контура", 0, 490)
+
+-- toggle highlight settings frame
+highlightSettingsBtn.MouseButton1Click:Connect(function()
+    highlightSettingsFrame.Visible = not highlightSettingsFrame.Visible
+    if highlightSettingsFrame.Visible then
+        highlightSettingsFrame.Position = UDim2.new(0, 10, 0, 600)
+        tween(highlightSettingsFrame, {Position = UDim2.new(0, 10, 0, 120)}, 0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    else
+        tween(highlightSettingsFrame, {Position = UDim2.new(0, 10, 0, 1000)}, 0.12)
+        task.delay(0.12, function()
+            if highlightSettingsFrame then highlightSettingsFrame.Visible = false end
+        end)
+    end
+end)
+
+-- ========== CLOSE BEHAVIOR ==========
+closeBtn.MouseButton1Click:Connect(function()
+    for _,c in ipairs(createdButtons) do
+        c.set(false)
+    end
+    -- remove highlights
+    for _,obj in ipairs(workspace:GetDescendants()) do
+        if obj:FindFirstChild("Highlight") then
+            pcall(function() obj.Highlight:Destroy() end)
+        end
+    end
+    for _,plr in ipairs(Players:GetPlayers()) do
+        if plr.Character and plr.Character:FindFirstChild("Highlight") then
+            pcall(function() plr.Character.Highlight:Destroy() end)
+        end
+    end
+    gui:Destroy()
+end)
+
+-- ========== HIGHLIGHT / ESP LOGIC ==========
+local function safeSetHighlight(obj, color, fillTransparency, outlineTransparency)
+    if not obj then return end
+    -- destroy old highlight if exists
+    for _, child in ipairs(obj:GetChildren()) do
+        if child:IsA("Highlight") then
+            pcall(function() child:Destroy() end)
+        end
+    end
+    
+    local ok, h = pcall(function()
+        local H = Instance.new("Highlight")
+        H.FillColor = color
+        H.FillTransparency = fillTransparency or 0.3
+        H.OutlineTransparency = outlineTransparency or 0
+        H.OutlineColor = Color3.new(1,1,1)
+        H.Parent = obj
+        return H
+    end)
+    
+    if not ok then
+        -- fallback attempt attach to PrimaryPart if obj:IsA("Model") and obj.PrimaryPart then
+        if obj:IsA("Model") and obj.PrimaryPart then
+            pcall(function()
+                local H2 = Instance.new("Highlight")
+                H2.FillColor = color
+                H2.FillTransparency = fillTransparency or 0.3
+                H2.OutlineTransparency = outlineTransparency or 0
+                H2.OutlineColor = Color3.new(1,1,1)
+                H2.Parent = obj.PrimaryPart
+            end)
+        end
+    end
+end
+
+local function safeRemoveHighlight(obj)
+    if not obj then return end
+    for _, child in ipairs(obj:GetChildren()) do
+        if child:IsA("Highlight") then
+            pcall(function() child:Destroy() end)
+        end
+    end
+end
+
+local function updateObjects()
+    for _,obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") then
+            if obj.Name == PALLET_NAME then
+                local cb = nil
+                for _,c in ipairs(createdButtons) do
+                    if c.name == "Палеты" then cb = c; break end
+                end
+                if cb and cb.get() then
+                    safeSetHighlight(obj, PALLET_COLOR, highlightSettings.palletFillTransparency, highlightSettings.palletOutlineTransparency)
+                else
+                    safeRemoveHighlight(obj)
+                end
+            elseif obj.Name == GEN_NAME then
+                local cb = nil
+                for _,c in ipairs(createdButtons) do
+                    if c.name == "Генераторы" then cb = c; break end
+                end
+                if cb and cb.get() then
+                    safeSetHighlight(obj, GEN_COLOR, highlightSettings.genFillTransparency, highlightSettings.genOutlineTransparency)
+                else
+                    safeRemoveHighlight(obj)
+                end
+            end
+        end
+    end
+end
+
+local function updatePlayers()
+    for _,plr in ipairs(Players:GetPlayers()) do
+        -- Исключаем локального игрока из подсветки
+        if plr ~= player and plr.Character then
+            local killer = isKiller(plr)
+            local killerCB, playersCB
+            for _,c in ipairs(createdButtons) do
+                if c.name == "Убийца" then killerCB = c end
+                if c.name == "Игроки" then playersCB = c end
+            end
+            
+            if killer and killerCB and killerCB.get() then
+                safeSetHighlight(plr.Character, KILLER_COLOR, highlightSettings.killerFillTransparency, highlightSettings.killerOutlineTransparency)
+            elseif (not killer) and playersCB and playersCB.get() then
+                safeSetHighlight(plr.Character, PLAYER_COLOR, highlightSettings.playerFillTransparency, highlightSettings.playerOutlineTransparency)
+            else
+                safeRemoveHighlight(plr.Character)
+            end
+        end
+    end
+end
+
+local function updateCollision()
+    local collCB
+    for _,c in ipairs(createdButtons) do
+        if c.name == "Коллизия" then collCB = c; break end
+    end
+    if player.Character and collCB then
+        for _,part in ipairs(player.Character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                pcall(function() part.CanCollide = collCB.get() end)
+            end
+        end
+    end
+end
+
+local function updateJump()
+    local jCB
+    for _,c in ipairs(createdButtons) do
+        if c.name == "Прыжок" then jCB = c; break end
+    end
+    if player.Character and player.Character:FindFirstChild("Humanoid") and jCB then
+        local hum = player.Character.Humanoid
+        if jCB.get() then
+            hum.JumpPower = 50
+            hum.UseJumpPower = true
+        else
+            hum.JumpPower = 0
+        end
+    end
+end
+
+-- ========== KEY BIND HANDLING ==========
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        local list = keyToButtons[input.KeyCode.Name]
+        if list then
+            for _, btn in ipairs(list) do
+                -- find createdButtons entry
+                for _,c in ipairs(createdButtons) do
+                    if c.btn == btn then
+                        c.set(not c.get()) -- toggle
+                        -- brief feedback animation
+                        tween(c.btn, {BackgroundColor3 = Color3.fromRGB(95,95,95)}, 0.06)
+                        task.delay(0.08, function()
+                            tween(c.btn, {BackgroundColor3 = Color3.fromRGB(38,38,40)}, 0.12)
+                        end)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+-- ensure bind labels show initial state
+for _,c in ipairs(createdButtons) do
+    setBind(c.btn, c.bindLabel)
+end
+
+-- ========== REFRESH TP LIST PERIODICALLY ==========
+spawn(function()
+    while gui.Parent do
+        refreshTPList()
+        task.wait(1.1)
+    end
+end)
+
+-- ========== MAIN LOOP ==========
+spawn(function()
+    while gui.Parent do
+        local ok = pcall(function()
+            updateObjects()
+            updatePlayers()
+            updateCollision()
+            updateJump()
+        end)
+        if not ok then
+            -- ignore
+        end
+        task.wait(math.max(0.1, scanInterval or DEFAULT_SCAN_INTERVAL))
+    end
+end)
+
+-- ========== FINISH SETUP: set initial labels & binds ==========
+-- set names and initial state texts correctly
+for _,c in ipairs(createdButtons) do
+    -- already set in creation; ensure bind label text shows
+    if c.bindLabel then
+        if binds[c.btn] then
+            c.bindLabel.Text = "Bind: " .. binds[c.btn].Name
+        else
+            c.bindLabel.Text = "Bind: -"
+        end
+    end
+end
+
+-- initial TP list fill
+refreshTPList()
+
+print("Stylish FinderMenu v2 loaded.")
+
+-- MovementMenu v5 — CUSTOMIZABLE DASH WITH SETTINGS
+-- Полная настройка деша
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+
+-- === SETTINGS ===
+local dashEnabled = true  
+local dashBind = Enum.KeyCode.LeftShift
+local DASH_DISTANCE = 14
+local DASH_DURATION = 0.18
+local DASH_COOLDOWN = 0
+local DASH_SPEED_BOOST = 50
+local DASH_SOUND = 3084314259
+
+-- === COOLDOWN SYSTEM ===
+local lastDashTime = 0
+local isDashing = false
+local originalWalkSpeed = 16 -- Сохраняем оригинальную скорость
+
+-- === GUI ===
+local gui = Instance.new("ScreenGui")
+gui.Name = "MovementDashMenu"
+gui.Parent = player:WaitForChild("PlayerGui")
+gui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 350, 0, 320)
+frame.Position = UDim2.new(0.7, 0, 0.2, 0)
+frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Draggable = true
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0,12)
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1,0,0,40)
+title.Position = UDim2.new(0,0,0,0)
+title.BackgroundTransparency = 1
+title.Text = "Movement v5 (CUSTOMIZABLE)"
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.TextColor3 = Color3.fromRGB(255,255,255)
+
+-- СЕКЦИЯ НАСТРОЕК
+local settingsLabel = Instance.new("TextLabel", frame)
+settingsLabel.Size = UDim2.new(1, -20, 0, 25)
+settingsLabel.Position = UDim2.new(0, 10, 0, 45)
+settingsLabel.BackgroundTransparency = 1
+settingsLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+settingsLabel.Font = Enum.Font.GothamBold
+settingsLabel.TextSize = 16
+settingsLabel.Text = "Настройки даша:"
+settingsLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Настройка длины даша
+local distanceFrame = Instance.new("Frame", frame)
+distanceFrame.Size = UDim2.new(1, -20, 0, 30)
+distanceFrame.Position = UDim2.new(0, 10, 0, 75)
+distanceFrame.BackgroundColor3 = Color3.fromRGB(35,35,37)
+distanceFrame.BorderSizePixel = 0
+Instance.new("UICorner", distanceFrame).CornerRadius = UDim.new(0,6)
+
+local distanceLabel = Instance.new("TextLabel", distanceFrame)
+distanceLabel.Size = UDim2.new(0.5, 0, 1, 0)
+distanceLabel.BackgroundTransparency = 1
+distanceLabel.Text = "Длина даша:"
+distanceLabel.TextColor3 = Color3.fromRGB(255,255,255)
+distanceLabel.Font = Enum.Font.Gotham
+distanceLabel.TextSize = 12
+distanceLabel.TextXAlignment = Enum.TextXAlignment.Left
+distanceLabel.Position = UDim2.new(0, 10, 0, 0)
+
+local distanceValue = Instance.new("TextLabel", distanceFrame)
+distanceValue.Size = UDim2.new(0.4, 0, 1, 0)
+distanceValue.Position = UDim2.new(0.55, 0, 0, 0)
+distanceValue.BackgroundTransparency = 1
+distanceValue.Text = tostring(DASH_DISTANCE)
+distanceValue.TextColor3 = Color3.fromRGB(100, 255, 100)
+distanceValue.Font = Enum.Font.GothamBold
+distanceValue.TextSize = 12
+
+local distanceMinus = Instance.new("TextButton", distanceFrame)
+distanceMinus.Size = UDim2.new(0.2, 0, 0.6, 0)
+distanceMinus.Position = UDim2.new(0.8, 2, 0.2, 0)
+distanceMinus.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+distanceMinus.TextColor3 = Color3.fromRGB(255,255,255)
+distanceMinus.Text = "-"
+distanceMinus.Font = Enum.Font.GothamBold
+distanceMinus.TextSize = 14
+Instance.new("UICorner", distanceMinus).CornerRadius = UDim.new(0,4)
+
+local distancePlus = Instance.new("TextButton", distanceFrame)
+distancePlus.Size = UDim2.new(0.2, 0, 0.6, 0)
+distancePlus.Position = UDim2.new(0.95, -22, 0.2, 0)
+distancePlus.BackgroundColor3 = Color3.fromRGB(60, 255, 60)
+distancePlus.TextColor3 = Color3.fromRGB(255,255,255)
+distancePlus.Text = "+"
+distancePlus.Font = Enum.Font.GothamBold
+distancePlus.TextSize = 14
+Instance.new("UICorner", distancePlus).CornerRadius = UDim.new(0,4)
+
+-- Настройка скорости даша
+local speedFrame = Instance.new("Frame", frame)
+speedFrame.Size = UDim2.new(1, -20, 0, 30)
+speedFrame.Position = UDim2.new(0, 10, 0, 110)
+speedFrame.BackgroundColor3 = Color3.fromRGB(35,35,37)
+speedFrame.BorderSizePixel = 0
+Instance.new("UICorner", speedFrame).CornerRadius = UDim.new(0,6)
+
+local speedLabel = Instance.new("TextLabel", speedFrame)
+speedLabel.Size = UDim2.new(0.5, 0, 1, 0)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Text = "Скорость даша:"
+speedLabel.TextColor3 = Color3.fromRGB(255,255,255)
+speedLabel.Font = Enum.Font.Gotham
+speedLabel.TextSize = 12
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Position = UDim2.new(0, 10, 0, 0)
+
+local speedValue = Instance.new("TextLabel", speedFrame)
+speedValue.Size = UDim2.new(0.4, 0, 1, 0)
+speedValue.Position = UDim2.new(0.55, 0, 0, 0)
+speedValue.BackgroundTransparency = 1
+speedValue.Text = tostring(DASH_SPEED_BOOST)
+speedValue.TextColor3 = Color3.fromRGB(100, 200, 255)
+speedValue.Font = Enum.Font.GothamBold
+speedValue.TextSize = 12
+
+local speedMinus = Instance.new("TextButton", speedFrame)
+speedMinus.Size = UDim2.new(0.2, 0, 0.6, 0)
+speedMinus.Position = UDim2.new(0.8, 2, 0.2, 0)
+speedMinus.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+speedMinus.TextColor3 = Color3.fromRGB(255,255,255)
+speedMinus.Text = "-"
+speedMinus.Font = Enum.Font.GothamBold
+speedMinus.TextSize = 14
+Instance.new("UICorner", speedMinus).CornerRadius = UDim.new(0,4)
+
+local speedPlus = Instance.new("TextButton", speedFrame)
+speedPlus.Size = UDim2.new(0.2, 0, 0.6, 0)
+speedPlus.Position = UDim2.new(0.95, -22, 0.2, 0)
+speedPlus.BackgroundColor3 = Color3.fromRGB(60, 255, 60)
+speedPlus.TextColor3 = Color3.fromRGB(255,255,255)
+speedPlus.Text = "+"
+speedPlus.Font = Enum.Font.GothamBold
+speedPlus.TextSize = 14
+Instance.new("UICorner", speedPlus).CornerRadius = UDim.new(0,4)
+
+-- Настройка длительности даша
+local durationFrame = Instance.new("Frame", frame)
+durationFrame.Size = UDim2.new(1, -20, 0, 30)
+durationFrame.Position = UDim2.new(0, 10, 0, 145)
+durationFrame.BackgroundColor3 = Color3.fromRGB(35,35,37)
+durationFrame.BorderSizePixel = 0
+Instance.new("UICorner", durationFrame).CornerRadius = UDim.new(0,6)
+
+local durationLabel = Instance.new("TextLabel", durationFrame)
+durationLabel.Size = UDim2.new(0.5, 0, 1, 0)
+durationLabel.BackgroundTransparency = 1
+durationLabel.Text = "Длительность:"
+durationLabel.TextColor3 = Color3.fromRGB(255,255,255)
+durationLabel.Font = Enum.Font.Gotham
+durationLabel.TextSize = 12
+durationLabel.TextXAlignment = Enum.TextXAlignment.Left
+durationLabel.Position = UDim2.new(0, 10, 0, 0)
+
+local durationValue = Instance.new("TextLabel", durationFrame)
+durationValue.Size = UDim2.new(0.4, 0, 1, 0)
+durationValue.Position = UDim2.new(0.55, 0, 0, 0)
+durationValue.BackgroundTransparency = 1
+durationValue.Text = string.format("%.2fs", DASH_DURATION)
+durationValue.TextColor3 = Color3.fromRGB(255, 200, 100)
+durationValue.Font = Enum.Font.GothamBold
+durationValue.TextSize = 12
+
+local durationMinus = Instance.new("TextButton", durationFrame)
+durationMinus.Size = UDim2.new(0.2, 0, 0.6, 0)
+durationMinus.Position = UDim2.new(0.8, 2, 0.2, 0)
+durationMinus.BackgroundColor3 = Color3.fromRGB(255, 60, 60)
+durationMinus.TextColor3 = Color3.fromRGB(255,255,255)
+durationMinus.Text = "-"
+durationMinus.Font = Enum.Font.GothamBold
+durationMinus.TextSize = 14
+Instance.new("UICorner", durationMinus).CornerRadius = UDim.new(0,4)
+
+local durationPlus = Instance.new("TextButton", durationFrame)
+durationPlus.Size = UDim2.new(0.2, 0, 0.6, 0)
+durationPlus.Position = UDim2.new(0.95, -22, 0.2, 0)
+durationPlus.BackgroundColor3 = Color3.fromRGB(60, 255, 60)
+durationPlus.TextColor3 = Color3.fromRGB(255,255,255)
+durationPlus.Text = "+"
+durationPlus.Font = Enum.Font.GothamBold
+durationPlus.TextSize = 14
+Instance.new("UICorner", durationPlus).CornerRadius = UDim.new(0,4)
+
+-- DASH BUTTON
+local dashBtn = Instance.new("TextButton", frame)
+dashBtn.Size = UDim2.new(0.6, -15, 0, 40)
+dashBtn.Position = UDim2.new(0, 10, 0, 190)
+dashBtn.BackgroundColor3 = Color3.fromRGB(40,40,42)
+dashBtn.TextColor3 = Color3.fromRGB(255,255,255)
+dashBtn.Font = Enum.Font.Gotham
+dashBtn.TextScaled = true
+dashBtn.Text = "Дэш"
+dashBtn.AutoButtonColor = false
+Instance.new("UICorner", dashBtn).CornerRadius = UDim.new(0,8)
+
+-- STATUS LABEL
+local statusLabel = Instance.new("TextLabel", frame)
+statusLabel.Size = UDim2.new(1, -20, 0, 25)
+statusLabel.Position = UDim2.new(0, 10, 0, 235)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+statusLabel.Font = Enum.Font.Gotham
+statusLabel.TextSize = 14
+statusLabel.Text = "Готов к дашу"
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- BIND LABEL
+local bindLabel = Instance.new("TextLabel", frame)
+bindLabel.Size = UDim2.new(0.35, -10, 0, 40)
+bindLabel.Position = UDim2.new(0.63, 0, 0, 190)
+bindLabel.BackgroundColor3 = Color3.fromRGB(30,30,32)
+bindLabel.TextColor3 = Color3.fromRGB(200,200,200)
+bindLabel.Font = Enum.Font.Gotham
+bindLabel.TextScaled = true
+bindLabel.Text = "Bind: " .. dashBind.Name
+Instance.new("UICorner", bindLabel).CornerRadius = UDim.new(0,8)
+
+-- CLOSE BUTTON
+local closeBtn = Instance.new("TextButton", frame)
+closeBtn.Size = UDim2.new(1, -20, 0, 40)
+closeBtn.Position = UDim2.new(0,10,0,270)
+closeBtn.BackgroundColor3 = Color3.fromRGB(140,30,30)
+closeBtn.TextColor3 = Color3.fromRGB(255,255,255)
+closeBtn.Font = Enum.Font.Gotham
+closeBtn.TextScaled = true
+closeBtn.Text = "Закрыть"
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0,8)
+
+-- === FUNCTIONS FOR SETTINGS ===
+local function updateDistance(value)
+    DASH_DISTANCE = math.clamp(DASH_DISTANCE + value, 5, 50)
+    distanceValue.Text = tostring(DASH_DISTANCE)
+end
+
+local function updateSpeed(value)
+    DASH_SPEED_BOOST = math.clamp(DASH_SPEED_BOOST + value, 20, 100)
+    speedValue.Text = tostring(DASH_SPEED_BOOST)
+end
+
+local function updateDuration(value)
+    DASH_DURATION = math.clamp(DASH_DURATION + value, 0.1, 1.0)
+    durationValue.Text = string.format("%.2fs", DASH_DURATION)
+end
+
+-- Кнопки настроек
+distanceMinus.MouseButton1Click:Connect(function() updateDistance(-1) end)
+distancePlus.MouseButton1Click:Connect(function() updateDistance(1) end)
+
+speedMinus.MouseButton1Click:Connect(function() updateSpeed(-5) end)
+speedPlus.MouseButton1Click:Connect(function() updateSpeed(5) end)
+
+durationMinus.MouseButton1Click:Connect(function() updateDuration(-0.05) end)
+durationPlus.MouseButton1Click:Connect(function() updateDuration(0.05) end)
+
+-- === OPTIMIZED DASH FUNCTION ===
+local function doDash()
+    if not dashEnabled or isDashing then return end
+    
+    local currentTime = tick()
+    if currentTime - lastDashTime < DASH_COOLDOWN then return end
+    
+    local char = player.Character
+    if not char then return end
+
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum or hum:GetState() == Enum.HumanoidStateType.Dead then return end
+
+    -- Сохраняем оригинальную скорость игрока
+    originalWalkSpeed = hum.WalkSpeed
+
+    -- Cooldown check
+    lastDashTime = currentTime
+    isDashing = true
+    
+    -- Update UI
+    dashBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 62)
+    statusLabel.Text = "Даш активирован!"
+    
+    -- Sound (async)
+    task.spawn(function()
+        local s = Instance.new("Sound")
+        s.SoundId = "rbxassetid://"..DASH_SOUND
+        s.Volume = 0.7
+        s.Parent = hrp
+        s:Play()
+        game:GetService("Debris"):AddItem(s, 3)
+    end)
+
+    -- Save original properties
+    local originalCFrame = hrp.CFrame
+    
+    -- Calculate dash direction and target
+    local dashDirection = hrp.CFrame.LookVector
+    local startPosition = hrp.Position
+    local targetPosition = startPosition + dashDirection * DASH_DISTANCE
+    
+    -- Raycast to check for obstacles
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.FilterDescendantsInstances = {char}
+    
+    local raycastResult = workspace:Raycast(startPosition, dashDirection * DASH_DISTANCE, raycastParams)
+    
+    if raycastResult then
+        targetPosition = raycastResult.Position - dashDirection * 2
+    end
+
+    -- Устанавливаем скорость даша
+    hum.WalkSpeed = DASH_SPEED_BOOST
+
+    -- Smooth dash using CFrame tweening
+    local dashStartTime = tick()
+    local dashEndTime = dashStartTime + DASH_DURATION
+    
+    -- Dash connection
+    local dashConnection
+    dashConnection = RunService.Heartbeat:Connect(function()
+        local currentTime = tick()
+        local alpha = (currentTime - dashStartTime) / DASH_DURATION
+        
+        if alpha >= 1 or not hrp or not hum then
+            dashConnection:Disconnect()
+            return
+        end
+        
+        -- Smooth interpolation
+        local smoothAlpha = 1 - (1 - alpha) * (1 - alpha) -- easeOutQuad
+        local currentPosition = startPosition:Lerp(targetPosition, smoothAlpha)
+        
+        -- Apply movement with collision check
+        local moveRay = workspace:Raycast(hrp.Position, (currentPosition - hrp.Position), raycastParams)
+        if not moveRay then
+            hrp.CFrame = CFrame.new(currentPosition) * originalCFrame.Rotation
+        else
+            -- Stop dash if hit obstacle
+            dashConnection:Disconnect()
+        end
+    end)
+
+    -- Cleanup after dash - ВОССТАНАВЛИВАЕМ ОРИГИНАЛЬНУЮ СКОРОСТЬ
+    task.delay(DASH_DURATION + 0.05, function()
+        if hum and hum.Parent then
+            hum.WalkSpeed = originalWalkSpeed -- Восстанавливаем оригинальную скорость
+        end
+        isDashing = false
+        
+        -- Reset UI
+        dashBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 42)
+        statusLabel.Text = "Готов к дашу"
+        
+        -- Cooldown indicator
+        local cooldownEnd = lastDashTime + DASH_COOLDOWN
+        local cooldownConnection
+        cooldownConnection = RunService.Heartbeat:Connect(function()
+            local remaining = cooldownEnd - tick()
+            if remaining > 0 then
+                statusLabel.Text = string.format("Cooldown: %.1fs", remaining)
+            else
+                statusLabel.Text = "Готов к дашу"
+                cooldownConnection:Disconnect()
+            end
+        end)
+    end)
+end
+
+-- === BIND SELECT ===
+local function startBind()
+    local overlay = Instance.new("TextLabel", frame)
+    overlay.Size = UDim2.new(1,0,1,0)
+    overlay.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    overlay.BackgroundTransparency = 0.3
+    overlay.Text = "Нажмите клавишу... (Backspace убрать)"
+    overlay.TextColor3 = Color3.fromRGB(255,255,255)
+    overlay.Font = Enum.Font.GothamBold
+    overlay.TextScaled = true
+    overlay.ZIndex = 5
+
+    local con
+    con = UserInputService.InputBegan:Connect(function(i,g)
+        if g then return end
+
+        if i.KeyCode == Enum.KeyCode.Backspace then
+            dashBind = nil
+            bindLabel.Text = "Bind: -"
+            overlay:Destroy()
+            con:Disconnect()
+            return
+        end
+
+        if i.UserInputType == Enum.UserInputType.Keyboard then
+            dashBind = i.KeyCode
+            bindLabel.Text = "Bind: "..i.KeyCode.Name
+            overlay:Destroy()
+            con:Disconnect()
+        end
+    end)
+end
+
+-- UI Events
+dashBtn.MouseButton1Click:Connect(doDash)
+dashBtn.MouseButton2Click:Connect(startBind)
+
+closeBtn.MouseButton1Click:Connect(function()
+    dashEnabled = false
+    gui:Destroy()
+end)
+
+-- KEYBOARD DASH
+UserInputService.InputBegan:Connect(function(i,g)
+    if g then return end
+    if not dashEnabled or isDashing then return end
+    if dashBind and i.KeyCode == dashBind then
+        doDash()
+    end
+end)
+
+-- Anti-lag: Cleanup when character dies
+player.CharacterAdded:Connect(function(character)
+    character:WaitForChild("Humanoid").Died:Connect(function()
+        isDashing = false
+        statusLabel.Text = "Возрождение..."
+    end)
+end)
+
+print("MovementMenu v5 CUSTOMIZABLE loaded.")
