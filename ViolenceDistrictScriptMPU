@@ -1,4 +1,4 @@
--- Stylish FinderMenu v2
+-- Stylish FinderMenu v5 - WORKING VERSION
 
 -- ========== CONFIG ==========
 local PALLET_NAME = "Palletwrong"
@@ -7,7 +7,6 @@ local PALLET_COLOR = Color3.fromRGB(0, 140, 255)
 local GEN_COLOR = Color3.fromRGB(255, 230, 0)
 local PLAYER_COLOR = Color3.fromRGB(0, 255, 0)
 local KILLER_COLOR = Color3.fromRGB(255, 0, 0)
-local DEFAULT_SCAN_INTERVAL = 6
 
 -- ========== SERVICES ==========
 local Players = game:GetService("Players")
@@ -18,12 +17,14 @@ local Lighting = game:GetService("Lighting")
 local player = Players.LocalPlayer
 
 -- ========== STATE ==========
-local scanInterval = DEFAULT_SCAN_INTERVAL
-local currentTheme = "Dark" -- Dark | Light | Neon
-local binds = {} -- btn -> KeyCode
-local keyToButtons = {} -- KeyCode.Name -> {btn,...}
-local createdButtons = {} -- {name, btn, get, set, bindLabel}
-local nightModeEnabled = false -- Состояние ночного режима
+local currentTheme = "Dark"
+local binds = {}
+local keyToButtons = {}
+local createdButtons = {}
+local nightModeEnabled = false
+local menuMinimized = false
+local activeHighlights = {}
+local themeEffects = {}
 
 -- Настройки подсветок
 local highlightSettings = {
@@ -34,10 +35,11 @@ local highlightSettings = {
     playerFillTransparency = 0.3,
     playerOutlineTransparency = 0,
     killerFillTransparency = 0.3,
-    killerOutlineTransparency = 0
+    killerOutlineTransparency = 0,
+    enabled = true
 }
 
--- small safe tween helper
+-- Утилиты
 local function tween(obj, props, time, style, dir)
     local info = TweenInfo.new(time or 0.18, style or Enum.EasingStyle.Quad, dir or Enum.EasingDirection.Out)
     local t = TweenService:Create(obj, info, props)
@@ -45,53 +47,247 @@ local function tween(obj, props, time, style, dir)
     return t
 end
 
--- ========== GUI (stylish) ==========
+-- ========== NOTIFICATION SYSTEM ==========
+local function showNotification(message, duration)
+    local notification = Instance.new("ScreenGui")
+    notification.Name = "MenuNotification"
+    notification.ResetOnSpawn = false
+    notification.Parent = player:WaitForChild("PlayerGui")
+    
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(0, 300, 0, 60)
+    frame.Position = UDim2.new(0.5, -150, 0.1, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(20,20,25)
+    frame.BackgroundTransparency = 0.2
+    frame.BorderSizePixel = 0
+    frame.Parent = notification
+    Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+    
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -20, 1, -20)
+    label.Position = UDim2.new(0, 10, 0, 10)
+    label.BackgroundTransparency = 1
+    label.Text = message
+    label.TextColor3 = Color3.fromRGB(255,255,255)
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.TextStrokeTransparency = 0.8
+    label.TextStrokeColor3 = Color3.fromRGB(0,0,0)
+    label.Parent = frame
+    
+    -- Анимация появления
+    frame.Position = UDim2.new(0.5, -150, 0, -100)
+    tween(frame, {Position = UDim2.new(0.5, -150, 0.1, 0)}, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    
+    task.delay(duration or 3, function()
+        tween(frame, {Position = UDim2.new(0.5, -150, 0, -100)}, 0.3)
+        task.delay(0.3, function()
+            notification:Destroy()
+        end)
+    end)
+end
+
+-- ========== THEME EFFECTS SYSTEM ==========
+local function clearThemeEffects()
+    for _, effect in pairs(themeEffects) do
+        if effect then
+            effect:Destroy()
+        end
+    end
+    themeEffects = {}
+end
+
+-- Простые эффекты для тем
+local function createOceanEffects(parent)
+    clearThemeEffects()
+    
+    -- Волны
+    local waves = Instance.new("Frame")
+    waves.Size = UDim2.new(1, 0, 0, 4)
+    waves.Position = UDim2.new(0, 0, 0, 0)
+    waves.BackgroundTransparency = 1
+    waves.Parent = parent
+    themeEffects.waves = waves
+    
+    for i = 1, 3 do
+        local wave = Instance.new("Frame")
+        wave.Size = UDim2.new(0.3, 0, 1, 0)
+        wave.Position = UDim2.new((i-1)*0.3, 0, 0, 0)
+        wave.BackgroundColor3 = Color3.fromRGB(100,200,255)
+        wave.BackgroundTransparency = 0.7
+        wave.BorderSizePixel = 0
+        wave.Parent = waves
+        
+        spawn(function()
+            while waves.Parent do
+                tween(wave, {Position = UDim2.new((i-1)*0.3 + 0.1, 0, 0, 0)}, 2, Enum.EasingStyle.Linear)
+                task.wait(2)
+                wave.Position = UDim2.new((i-1)*0.3 - 0.1, 0, 0, 0)
+            end
+        end)
+    end
+    
+    -- Рыбки
+    local fishContainer = Instance.new("Frame")
+    fishContainer.Size = UDim2.new(1, 0, 1, 0)
+    fishContainer.BackgroundTransparency = 1
+    fishContainer.Parent = parent
+    themeEffects.fishContainer = fishContainer
+    
+    local fishEmojis = {"🐠", "🐟", "🐡", "🦈"}
+    for i = 1, 4 do
+        local fish = Instance.new("TextLabel")
+        fish.Size = UDim2.new(0, 30, 0, 30)
+        fish.Position = UDim2.new(math.random() * 0.8, 0, math.random() * 0.8, 0)
+        fish.BackgroundTransparency = 1
+        fish.Text = fishEmojis[i]
+        fish.TextScaled = true
+        fish.TextColor3 = Color3.fromRGB(255,255,200)
+        fish.Font = Enum.Font.Gotham
+        fish.Parent = fishContainer
+        
+        spawn(function()
+            while fish.Parent do
+                tween(fish, {
+                    Position = UDim2.new(math.random() * 0.8, 0, math.random() * 0.8, 0)
+                }, math.random(3,6), Enum.EasingStyle.Sine)
+                task.wait(math.random(4,8))
+            end
+        end)
+    end
+end
+
+local function createNeonEffects(parent)
+    clearThemeEffects()
+    
+    -- Пульсирующее свечение
+    local glow = Instance.new("Frame")
+    glow.Size = UDim2.new(1, 20, 1, 20)
+    glow.Position = UDim2.new(0, -10, 0, -10)
+    glow.BackgroundColor3 = Color3.fromRGB(255,50,255)
+    glow.BackgroundTransparency = 0.9
+    glow.BorderSizePixel = 0
+    glow.Parent = parent
+    Instance.new("UICorner", glow).CornerRadius = UDim.new(0,16)
+    themeEffects.glow = glow
+    
+    spawn(function()
+        while glow.Parent do
+            tween(glow, {BackgroundTransparency = 0.8}, 0.5, Enum.EasingStyle.Sine)
+            task.wait(0.5)
+            tween(glow, {BackgroundTransparency = 0.9}, 0.5, Enum.EasingStyle.Sine)
+            task.wait(0.5)
+        end
+    end)
+    
+    -- Неоновые линии
+    for i = 1, 2 do
+        local line = Instance.new("Frame")
+        line.Size = UDim2.new(1, 0, 0, 2)
+        line.Position = UDim2.new(0, 0, i/3 - 0.1, 0)
+        line.BackgroundColor3 = Color3.fromRGB(255,50,255)
+        line.BorderSizePixel = 0
+        line.BackgroundTransparency = 0.3
+        line.Parent = parent
+        
+        spawn(function()
+            local dir = 1
+            while line.Parent do
+                tween(line, {BackgroundTransparency = dir == 1 and 0.1 or 0.5}, 0.3)
+                dir = -dir
+                task.wait(0.3)
+            end
+        end)
+    end
+end
+
+local function createMatrixEffects(parent)
+    clearThemeEffects()
+    
+    -- Матричный код
+    local codeContainer = Instance.new("Frame")
+    codeContainer.Size = UDim2.new(1, 0, 1, 0)
+    codeContainer.BackgroundTransparency = 1
+    codeContainer.Parent = parent
+    themeEffects.codeContainer = codeContainer
+    
+    local matrixChars = {"0", "1", "ﾊ", "ﾐ", "ﾋ", "ｰ", "ｳ", "ｼ", "ﾅ", "ﾓ", "ﾆ", "ｻ", "ﾜ", "ﾂ", "ｵ", "ﾘ", "ｱ", "ﾎ", "ﾃ", "ﾏ", "ｹ", "ﾒ", "ｴ", "ｶ", "ｷ", "ﾑ", "ﾕ", "ﾗ", "ｾ", "ﾈ", "ｽ", "ﾀ", "ﾇ", "ﾍ", "ｦ", "ｲ", "ｸ", "ｺ", "ｿ", "ﾁ", "ﾄ", "ﾉ", "ﾌ", "ｴ", "ｵ", "ﾑ", "ﾕ", "ﾗ"}
+    
+    for i = 1, 20 do
+        local char = Instance.new("TextLabel")
+        char.Size = UDim2.new(0, 20, 0, 20)
+        char.Position = UDim2.new(math.random(), 0, 0, -40)
+        char.BackgroundTransparency = 1
+        char.Text = matrixChars[math.random(#matrixChars)]
+        char.TextColor3 = Color3.fromRGB(0,255,0)
+        char.TextScaled = true
+        char.Font = Enum.Font.Code
+        char.TextTransparency = 0.3
+        char.Parent = codeContainer
+        
+        spawn(function()
+            while char.Parent do
+                char.Text = matrixChars[math.random(#matrixChars)]
+                char.Position = UDim2.new(math.random(), 0, 0, -40)
+                char.TextTransparency = 0.3
+                
+                tween(char, {
+                    Position = UDim2.new(char.Position.X.Scale, 0, 1, 40),
+                    TextTransparency = 1
+                }, math.random(2,4), Enum.EasingStyle.Linear)
+                
+                task.wait(math.random(1,3))
+            end
+        end)
+    end
+end
+
+-- ========== MAIN GUI CREATION ==========
 local gui = Instance.new("ScreenGui")
 gui.Name = "FinderMenu"
 gui.ResetOnSpawn = false
 gui.Parent = player:WaitForChild("PlayerGui")
 
--- root frame (slightly wider and modern)
+-- Root frame
 local frame = Instance.new("Frame")
-frame.Size = UDim2.new(0, 320, 0, 560) -- Increased height for new button
+frame.Size = UDim2.new(0, 320, 0, 560)
 frame.Position = UDim2.new(0.03, 0, 0.18, 0)
 frame.BackgroundColor3 = Color3.fromRGB(18,18,20)
-frame.BackgroundTransparency = 0
 frame.BorderSizePixel = 0
 frame.Active = true
 frame.Draggable = true
 frame.Parent = gui
 Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 14)
 
--- soft shadow (ImageLabel)
-local shadow = Instance.new("ImageLabel")
-shadow.Parent = frame
-shadow.ZIndex = -1
-shadow.AnchorPoint = Vector2.new(0.5, 0.5)
-shadow.Position = UDim2.new(0.5, 0.5, 0.5, 0)
-shadow.Size = UDim2.new(1, 60, 1, 60)
-shadow.Image = "rbxassetid://1316045217"
-shadow.BackgroundTransparency = 1
-shadow.ImageTransparency = 0.45
+-- Minimize button
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Size = UDim2.new(0, 24, 0, 24)
+minimizeBtn.Position = UDim2.new(1, -30, 0, 8)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(40,40,50)
+minimizeBtn.BorderSizePixel = 0
+minimizeBtn.Text = "–"
+minimizeBtn.TextColor3 = Color3.fromRGB(220,220,220)
+minimizeBtn.TextScaled = true
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.Parent = frame
+Instance.new("UICorner", minimizeBtn).CornerRadius = UDim.new(0, 6)
 
--- gradient header
-local header = Instance.new("Frame", frame)
+-- Header
+local header = Instance.new("Frame")
 header.Size = UDim2.new(1, 0, 0, 56)
 header.Position = UDim2.new(0, 0, 0, 0)
 header.BackgroundTransparency = 1
+header.Parent = frame
 
-local headerBg = Instance.new("Frame", header)
+local headerBg = Instance.new("Frame")
 headerBg.Size = UDim2.new(1, 0, 1, 0)
 headerBg.Position = UDim2.new(0,0,0,0)
 headerBg.BackgroundColor3 = Color3.fromRGB(28,28,30)
 headerBg.BorderSizePixel = 0
+headerBg.Parent = header
 Instance.new("UICorner", headerBg).CornerRadius = UDim.new(0, 14)
 
-local grad = Instance.new("UIGradient", headerBg)
-grad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(50,50,80)), ColorSequenceKeypoint.new(1, Color3.fromRGB(22,22,28))})
-grad.Rotation = 90
-
-local title = Instance.new("TextLabel", headerBg)
+local title = Instance.new("TextLabel")
 title.Size = UDim2.new(0.7, -10, 1, -6)
 title.Position = UDim2.new(0, 12, 0, 3)
 title.BackgroundTransparency = 1
@@ -100,107 +296,258 @@ title.TextColor3 = Color3.fromRGB(230,230,230)
 title.TextScaled = true
 title.Font = Enum.Font.GothamBold
 title.TextXAlignment = Enum.TextXAlignment.Left
+title.Parent = headerBg
 
--- small subtitle
-local sub = Instance.new("TextLabel", headerBg)
+local sub = Instance.new("TextLabel")
 sub.Size = UDim2.new(0.3, -12, 1, -6)
 sub.Position = UDim2.new(0.7, 10, 0, 3)
 sub.BackgroundTransparency = 1
-sub.Text = "v2 stylish"
+sub.Text = "v5"
 sub.TextColor3 = Color3.fromRGB(170,170,170)
 sub.TextScaled = true
 sub.Font = Enum.Font.Gotham
 sub.TextXAlignment = Enum.TextXAlignment.Right
+sub.Parent = headerBg
 
--- container for content
-local content = Instance.new("Frame", frame)
+-- Content
+local content = Instance.new("Frame")
 content.Size = UDim2.new(1, -20, 1, -80)
 content.Position = UDim2.new(0, 10, 0, 70)
 content.BackgroundTransparency = 1
+content.Parent = frame
 
--- rounded background for content
-local contentBg = Instance.new("Frame", content)
+local contentBg = Instance.new("Frame")
 contentBg.Size = UDim2.new(1, 0, 1, 0)
 contentBg.Position = UDim2.new(0,0,0,0)
 contentBg.BackgroundColor3 = Color3.fromRGB(22,22,24)
 contentBg.BorderSizePixel = 0
+contentBg.Parent = content
 Instance.new("UICorner", contentBg).CornerRadius = UDim.new(0, 10)
 
--- subtle inner glow (gradient)
-local innerGrad = Instance.new("UIGradient", contentBg)
-innerGrad.Color = ColorSequence.new({ColorSequenceKeypoint.new(0, Color3.fromRGB(28,28,32)), ColorSequenceKeypoint.new(1, Color3.fromRGB(18,18,20))})
-innerGrad.Rotation = 90
-innerGrad.Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 0)})
-
--- helper to create button rows with bind label
-local function createRow(y)
-    local btn = Instance.new("TextButton", contentBg)
+-- ========== CREATE BUTTONS ==========
+local function createButton(name, yPos)
+    local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0.66, -10, 0, 36)
-    btn.Position = UDim2.new(0, 10, 0, y)
+    btn.Position = UDim2.new(0, 10, 0, yPos)
     btn.BackgroundColor3 = Color3.fromRGB(38,38,40)
     btn.BorderSizePixel = 0
     btn.AutoButtonColor = false
     btn.TextColor3 = Color3.fromRGB(240,240,240)
     btn.TextScaled = true
     btn.Font = Enum.Font.Gotham
+    btn.Text = name .. ": OFF"
+    btn.Parent = contentBg
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
 
-    local bindLabel = Instance.new("TextLabel", contentBg)
+    local bindLabel = Instance.new("TextLabel")
     bindLabel.Size = UDim2.new(0.28, -10, 0, 24)
-    bindLabel.Position = UDim2.new(0.68, 10, 0, y + 6)
+    bindLabel.Position = UDim2.new(0.68, 10, 0, yPos + 6)
     bindLabel.BackgroundColor3 = Color3.fromRGB(30,30,32)
     bindLabel.TextColor3 = Color3.fromRGB(200,200,200)
     bindLabel.TextScaled = true
     bindLabel.Text = "Bind: -"
     bindLabel.Font = Enum.Font.Gotham
+    bindLabel.Parent = contentBg
     Instance.new("UICorner", bindLabel).CornerRadius = UDim.new(0,8)
 
     return btn, bindLabel
 end
 
--- create rows (matching original layout order)
-local y = 12
-local palletBtn, palletBind = createRow(y); y = y + 44
-local genBtn, genBind = createRow(y); y = y + 44
-local playersBtn, playersBind = createRow(y); y = y + 44
-local killerBtn, killerBind = createRow(y); y = y + 44
-local collisionBtn, collisionBind = createRow(y); y = y + 44
-local jumpBtn, jumpBind = createRow(y); y = y + 44
-local nightModeBtn, nightModeBind = createRow(y); y = y + 44 -- Новая кнопка ночного режима
+-- Создаем основные кнопки
+local yPos = 12
+local buttons = {}
 
--- teleport & settings & close buttons (full-width look)
-local function createFullButton(text, posY, color)
-    local b = Instance.new("TextButton", contentBg)
-    b.Size = UDim2.new(1, -20, 0, 36)
-    b.Position = UDim2.new(0, 10, 0, posY)
-    b.BackgroundColor3 = color or Color3.fromRGB(70,70,90)
-    b.BorderSizePixel = 0
-    b.Text = text
-    b.TextScaled = true
-    b.Font = Enum.Font.Gotham
-    b.TextColor3 = Color3.fromRGB(245,245,245)
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,8)
-    return b
+local palletBtn, palletBind = createButton("Палеты", yPos); yPos = yPos + 44
+local genBtn, genBind = createButton("Генераторы", yPos); yPos = yPos + 44
+local playersBtn, playersBind = createButton("Игроки", yPos); yPos = yPos + 44
+local killerBtn, killerBind = createButton("Убийца", yPos); yPos = yPos + 44
+local collisionBtn, collisionBind = createButton("Коллизия", yPos); yPos = yPos + 44
+local jumpBtn, jumpBind = createButton("Прыжок", yPos); yPos = yPos + 44
+local nightModeBtn, nightModeBind = createButton("Ночной режим", yPos); yPos = yPos + 44
+
+-- Создаем полноразмерные кнопки
+local function createFullButton(text, color)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -20, 0, 36)
+    btn.Position = UDim2.new(0, 10, 0, yPos + 4)
+    btn.BackgroundColor3 = color
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    btn.TextColor3 = Color3.fromRGB(245,245,245)
+    btn.Parent = contentBg
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
+    
+    yPos = yPos + 44
+    return btn
 end
 
-local tpBtn = createFullButton("Телепорт к игрокам", y + 4, Color3.fromRGB(70,70,120)); y = y + 44
-local settingsBtn = createFullButton("Настройки", y + 4, Color3.fromRGB(80,50,50)); y = y + 44
-local highlightSettingsBtn = createFullButton("Настройки подсветок", y + 4, Color3.fromRGB(50,80,50)); y = y + 44 -- Новая кнопка
-local closeBtn = createFullButton("Закрыть меню", y + 4, Color3.fromRGB(140,30,30)); y = y + 44
+local tpBtn = createFullButton("Телепорт к игрокам", Color3.fromRGB(70,70,120))
+local settingsBtn = createFullButton("Настройки", Color3.fromRGB(80,50,50))
+local highlightSettingsBtn = createFullButton("Настройки подсветок", Color3.fromRGB(50,80,50))
+local closeBtn = createFullButton("Закрыть меню", Color3.fromRGB(140,30,30))
 
--- tooltip small label for explaining right-click
-local hint = Instance.new("TextLabel", contentBg)
+-- Подсказка
+local hint = Instance.new("TextLabel")
 hint.Size = UDim2.new(1, -20, 0, 20)
-hint.Position = UDim2.new(0, 10, 0, y + 4)
+hint.Position = UDim2.new(0, 10, 0, yPos + 4)
 hint.BackgroundTransparency = 1
 hint.Text = "Правая кнопка мыши по кнопке — привязать клавишу | Backspace — удалить привязку"
 hint.TextColor3 = Color3.fromRGB(170,170,170)
 hint.TextScaled = true
 hint.Font = Enum.Font.Gotham
+hint.Parent = contentBg
 
--- ========== BUTTON LOGIC + BIND UI ==========
+-- ========== MINIMIZE FUNCTIONALITY ==========
+local function toggleMinimize()
+    menuMinimized = not menuMinimized
+    if menuMinimized then
+        content.Visible = false
+        headerBg.Size = UDim2.new(1, 0, 1, 0)
+        frame.Size = UDim2.new(0, 120, 0, 56)
+        minimizeBtn.Text = "+"
+        minimizeBtn.Position = UDim2.new(1, -30, 0, 8)
+        showNotification("Меню свёрнуто. Нажмите Right Shift чтобы развернуть", 3)
+    else
+        content.Visible = true
+        headerBg.Size = UDim2.new(1, 0, 1, 0)
+        frame.Size = UDim2.new(0, 320, 0, 560)
+        minimizeBtn.Text = "–"
+        minimizeBtn.Position = UDim2.new(1, -30, 0, 8)
+    end
+end
 
--- helper to set bind label for a button
+minimizeBtn.MouseButton1Click:Connect(toggleMinimize)
+
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.RightShift then
+        toggleMinimize()
+    end
+end)
+
+-- ========== HIGHLIGHT SYSTEM ==========
+local function safeSetHighlight(obj, color, fillTransparency, outlineTransparency)
+    if not obj or not highlightSettings.enabled then return end
+    
+    if activeHighlights[obj] then
+        pcall(function() activeHighlights[obj]:Destroy() end)
+    end
+    
+    local ok, h = pcall(function()
+        local H = Instance.new("Highlight")
+        H.FillColor = color
+        H.FillTransparency = fillTransparency
+        H.OutlineTransparency = outlineTransparency
+        H.OutlineColor = Color3.new(1,1,1)
+        H.Parent = obj
+        return H
+    end)
+    
+    if ok then
+        activeHighlights[obj] = h
+    end
+end
+
+local function safeRemoveHighlight(obj)
+    if not obj then return end
+    if activeHighlights[obj] then
+        pcall(function() activeHighlights[obj]:Destroy() end)
+        activeHighlights[obj] = nil
+    end
+end
+
+-- Функция обновления подсветок
+local function updateHighlights()
+    -- Очищаем старые подсветки
+    for obj, highlight in pairs(activeHighlights) do
+        if not obj or not obj.Parent then
+            pcall(function() highlight:Destroy() end)
+            activeHighlights[obj] = nil
+        end
+    end
+    
+    -- Получаем состояния кнопок
+    local states = {}
+    for _, btn in ipairs(createdButtons) do
+        states[btn.name] = btn.get()
+    end
+    
+    -- Подсвечиваем палеты
+    if states["Палеты"] then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") and obj.Name == PALLET_NAME then
+                safeSetHighlight(obj, PALLET_COLOR, 
+                    highlightSettings.palletFillTransparency, 
+                    highlightSettings.palletOutlineTransparency)
+            end
+        end
+    end
+    
+    -- Подсвечиваем генераторы
+    if states["Генераторы"] then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("Model") and obj.Name == GEN_NAME then
+                safeSetHighlight(obj, GEN_COLOR, 
+                    highlightSettings.genFillTransparency, 
+                    highlightSettings.genOutlineTransparency)
+            end
+        end
+    end
+    
+    -- Подсвечиваем игроков
+    local function isKiller(plr)
+        if not plr then return false end
+        if plr:FindFirstChild("Backpack") and plr.Backpack:FindFirstChild("Weapon") then return true end
+        if plr.Character and plr.Character:FindFirstChild("Weapon") then return true end
+        if plr.Character then
+            for _,c in ipairs(plr.Character:GetChildren()) do
+                if c:IsA("Tool") then return true end
+            end
+        end
+        return false
+    end
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= player and plr.Character then
+            local killer = isKiller(plr)
+            
+            if killer and states["Убийца"] then
+                safeSetHighlight(plr.Character, KILLER_COLOR, 
+                    highlightSettings.killerFillTransparency, 
+                    highlightSettings.killerOutlineTransparency)
+            elseif (not killer) and states["Игроки"] then
+                safeSetHighlight(plr.Character, PLAYER_COLOR, 
+                    highlightSettings.playerFillTransparency, 
+                    highlightSettings.playerOutlineTransparency)
+            else
+                safeRemoveHighlight(plr.Character)
+            end
+        end
+    end
+end
+
+-- ========== NIGHT MODE FUNCTION ==========
+local function toggleNightMode()
+    nightModeEnabled = not nightModeEnabled
+    if nightModeEnabled then
+        Lighting.Ambient = Color3.new(0.8, 0.8, 0.8)
+        Lighting.Brightness = 2
+        Lighting.ClockTime = 14
+        Lighting.GeographicLatitude = 45
+        Lighting.OutdoorAmbient = Color3.new(0.7, 0.7, 0.7)
+        Lighting.ShadowSoftness = 0.1
+    else
+        Lighting.Ambient = Color3.new(0.5, 0.5, 0.5)
+        Lighting.Brightness = 1
+        Lighting.ClockTime = 14
+        Lighting.GeographicLatitude = 41.28
+        Lighting.OutdoorAmbient = Color3.new(0.5, 0.5, 0.5)
+        Lighting.ShadowSoftness = 0.5
+    end
+end
+
+-- ========== BUTTON LOGIC ==========
 local function setBind(btn, label)
     local k = binds[btn]
     if k then
@@ -210,10 +557,8 @@ local function setBind(btn, label)
     end
 end
 
--- right-click binding behavior (generic)
 local function enableBinding(btn, label)
     btn.MouseButton2Click:Connect(function()
-        -- show a small temporary overlay on the button to indicate waiting for key
         local overlay = Instance.new("TextLabel", btn)
         overlay.Size = UDim2.new(1, 0, 1, 0)
         overlay.Position = UDim2.new(0, 0, 0, 0)
@@ -230,9 +575,7 @@ local function enableBinding(btn, label)
             if gp then return end
             if input.UserInputType == Enum.UserInputType.Keyboard then
                 local kc = input.KeyCode
-                -- delete bind with Backspace/Delete
                 if kc == Enum.KeyCode.Backspace or kc == Enum.KeyCode.Delete then
-                    -- remove old mapping for this btn
                     if binds[btn] then
                         local old = binds[btn]
                         local list = keyToButtons[old.Name]
@@ -252,7 +595,6 @@ local function enableBinding(btn, label)
                     return
                 end
                 
-                -- store bind
                 if binds[btn] then
                     local old = binds[btn]
                     local list = keyToButtons[old.Name]
@@ -282,53 +624,10 @@ local function enableBinding(btn, label)
     end)
 end
 
--- Функция для переключения ночного режима
-local function toggleNightMode()
-    nightModeEnabled = not nightModeEnabled
-    if nightModeEnabled then
-        -- Включаем светлую карту
-        Lighting.Ambient = Color3.new(0.8, 0.8, 0.8) -- Светлый ambient
-        Lighting.Brightness = 2 -- Увеличиваем яркость
-        Lighting.ClockTime = 14 -- Дневное время
-        Lighting.GeographicLatitude = 45 -- Умеренная широта для нормального освещения
-        Lighting.OutdoorAmbient = Color3.new(0.7, 0.7, 0.7) -- Светлый outdoor ambient
-        
-        -- Настройки для светлого неба
-        if Lighting:FindFirstChild("Sky") then
-            Lighting.Sky.SkyboxBk = "rbxassetid://9851144466" -- Голубое небо
-            Lighting.Sky.SkyboxDn = "rbxassetid://9851143246"
-            Lighting.Sky.SkyboxFt = "rbxassetid://9851144466"
-            Lighting.Sky.SkyboxLf = "rbxassetid://9851144466"
-            Lighting.Sky.SkyboxRt = "rbxassetid://9851144466"
-            Lighting.Sky.SkyboxUp = "rbxassetid://9851142093"
-        end
-        
-        -- Уменьшаем тени для более светлого вида
-        Lighting.ShadowSoftness = 0.1
-    else
-        -- Возвращаем стандартные настройки
-        Lighting.Ambient = Color3.new(0.5, 0.5, 0.5)
-        Lighting.Brightness = 1
-        Lighting.ClockTime = 14
-        Lighting.GeographicLatitude = 41.28
-        Lighting.OutdoorAmbient = Color3.new(0.5, 0.5, 0.5)
-        Lighting.ShadowSoftness = 0.5
-        
-        -- Возвращаем стандартное небо
-        if Lighting:FindFirstChild("Sky") then
-            Lighting.Sky.SkyboxBk = "rbxassetid://7018684000"
-            Lighting.Sky.SkyboxDn = "rbxassetid://6334928194"
-            Lighting.Sky.SkyboxFt = "rbxassetid://7018684000"
-            Lighting.Sky.SkyboxLf = "rbxassetid://7018684000"
-            Lighting.Sky.SkyboxRt = "rbxassetid://7018684000"
-            Lighting.Sky.SkyboxUp = "rbxassetid://7018689553"
-        end
-    end
-end
-
--- create internal toggle state (getter/setter) and link to UI
-local function createToggleLogic(btn, label, name)
+-- Создаем логику для переключателей
+local function createToggleLogic(btn, bindLabel, name)
     local state = false
+    
     local function updateVisual()
         if state then
             btn.BackgroundColor3 = Color3.fromRGB(60, 110, 60)
@@ -342,63 +641,68 @@ local function createToggleLogic(btn, label, name)
     btn.MouseButton1Click:Connect(function()
         state = not state
         updateVisual()
-    end)
-    
-    -- right click binding
-    enableBinding(btn, label)
-    setBind(btn, label)
-    
-    -- store in createdButtons for external access
-    table.insert(createdButtons, {name = name, btn = btn, get = function() return state end, set = function(v) state = v; updateVisual() end, bindLabel = label})
-    updateVisual()
-end
-
--- Специальная логика для кнопки ночного режима
-local function createNightModeToggleLogic(btn, label, name)
-    local state = false
-    local function updateVisual()
-        if state then
-            btn.BackgroundColor3 = Color3.fromRGB(80, 130, 210) -- Синий цвет для ночного режима
-            btn.Text = name .. ": ON"
-        else
-            btn.BackgroundColor3 = Color3.fromRGB(38,38,40)
-            btn.Text = name .. ": OFF"
+        
+        -- Обработка специальных функций
+        if name == "Коллизия" then
+            if player.Character then
+                for _, part in ipairs(player.Character:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        pcall(function() part.CanCollide = state end)
+                    end
+                end
+            end
+        elseif name == "Прыжок" then
+            if player.Character and player.Character:FindFirstChild("Humanoid") then
+                local hum = player.Character.Humanoid
+                if state then
+                    hum.JumpPower = 50
+                    hum.UseJumpPower = true
+                else
+                    hum.JumpPower = 0
+                end
+            end
+        elseif name == "Ночной режим" then
+            toggleNightMode()
         end
-    end
-    
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        updateVisual()
-        toggleNightMode() -- Вызываем функцию переключения ночного режима
+        
+        -- Обновляем подсветки
+        updateHighlights()
     end)
     
-    -- right click binding
-    enableBinding(btn, label)
-    setBind(btn, label)
+    enableBinding(btn, bindLabel)
+    setBind(btn, bindLabel)
     
-    -- store in createdButtons for external access
-    table.insert(createdButtons, {name = name, btn = btn, get = function() return state end, set = function(v) state = v; updateVisual() end, bindLabel = label})
+    table.insert(createdButtons, {
+        name = name,
+        btn = btn,
+        get = function() return state end,
+        set = function(v) state = v; updateVisual() end,
+        bindLabel = bindLabel
+    })
+    
     updateVisual()
 end
 
+-- Создаем логику для всех кнопок
 createToggleLogic(palletBtn, palletBind, "Палеты")
 createToggleLogic(genBtn, genBind, "Генераторы")
 createToggleLogic(playersBtn, playersBind, "Игроки")
 createToggleLogic(killerBtn, killerBind, "Убийца")
 createToggleLogic(collisionBtn, collisionBind, "Коллизия")
 createToggleLogic(jumpBtn, jumpBind, "Прыжок")
-createNightModeToggleLogic(nightModeBtn, nightModeBind, "Ночной режим") -- Новая кнопка
+createToggleLogic(nightModeBtn, nightModeBind, "Ночной режим")
 
--- ========== TELEPORT UI (TP FRAME) ==========
-local tpFrame = Instance.new("Frame", frame)
+-- ========== TELEPORT UI ==========
+local tpFrame = Instance.new("Frame")
 tpFrame.Size = UDim2.new(0, 260, 0, 320)
-tpFrame.Position = UDim2.new(0, 10, 0, 1000) -- hidden below
+tpFrame.Position = UDim2.new(0, 10, 0, 1000)
 tpFrame.BackgroundColor3 = Color3.fromRGB(14,14,16)
 tpFrame.BorderSizePixel = 0
+tpFrame.Parent = frame
 Instance.new("UICorner", tpFrame).CornerRadius = UDim.new(0,10)
 tpFrame.Visible = false
 
-local tpTitle = Instance.new("TextLabel", tpFrame)
+local tpTitle = Instance.new("TextLabel")
 tpTitle.Size = UDim2.new(1, -16, 0, 30)
 tpTitle.Position = UDim2.new(0, 8, 0, 8)
 tpTitle.BackgroundTransparency = 1
@@ -406,58 +710,48 @@ tpTitle.Text = "Телепорт к игрокам"
 tpTitle.TextColor3 = Color3.fromRGB(230,230,230)
 tpTitle.TextScaled = true
 tpTitle.Font = Enum.Font.GothamBold
+tpTitle.Parent = tpFrame
 
-local tpScroll = Instance.new("ScrollingFrame", tpFrame)
+local tpScroll = Instance.new("ScrollingFrame")
 tpScroll.Size = UDim2.new(1, -16, 1, -52)
 tpScroll.Position = UDim2.new(0, 8, 0, 44)
 tpScroll.CanvasSize = UDim2.new(0,0,0,0)
 tpScroll.ScrollBarThickness = 6
 tpScroll.BackgroundTransparency = 1
+tpScroll.Parent = tpFrame
 
-local tpLayout = Instance.new("UIListLayout", tpScroll)
+local tpLayout = Instance.new("UIListLayout")
 tpLayout.Padding = UDim.new(0,6)
-
-local function isKiller(plr)
-    if not plr then return false end
-    if plr:FindFirstChild("Backpack") and plr.Backpack:FindFirstChild("Weapon") then return true end
-    if plr.Character and plr.Character:FindFirstChild("Weapon") then return true end
-    if plr.Character then
-        for _,c in ipairs(plr.Character:GetChildren()) do
-            if c:IsA("Tool") then return true end
-        end
-    end
-    return false
-end
+tpLayout.Parent = tpScroll
 
 local function refreshTPList()
-    for _,child in ipairs(tpScroll:GetChildren()) do
+    for _, child in ipairs(tpScroll:GetChildren()) do
         if child:IsA("TextButton") then
             child:Destroy()
         end
     end
     
-    local players = Players:GetPlayers()
-    for _,plr in ipairs(players) do
+    for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= player then
-            local b = Instance.new("TextButton", tpScroll)
+            local b = Instance.new("TextButton")
             b.Size = UDim2.new(1, -8, 0, 30)
             b.BackgroundColor3 = Color3.fromRGB(30,30,30)
             b.TextScaled = true
             b.Font = Enum.Font.Gotham
             b.Text = plr.Name
-            b.TextColor3 = isKiller(plr) and KILLER_COLOR or PLAYER_COLOR
+            b.TextColor3 = Color3.fromRGB(255,255,255)
+            b.Parent = tpScroll
             Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
             
             b.MouseButton1Click:Connect(function()
                 if player.Character and plr.Character then
-                    local ok = pcall(function()
-                        player.Character:PivotTo(plr.Character:GetPivot() + Vector3.new(0,2,0))
-                    end)
-                    if not ok then
-                        if player.Character.PrimaryPart and plr.Character.PrimaryPart then
-                            player.Character:SetPrimaryPartCFrame(plr.Character.PrimaryPart.CFrame + Vector3.new(0,2,0))
+                    pcall(function()
+                        local targetCFrame = plr.Character:GetPivot()
+                        if not targetCFrame then
+                            targetCFrame = plr.Character.PrimaryPart.CFrame
                         end
-                    end
+                        player.Character:PivotTo(targetCFrame + Vector3.new(0,2,0))
+                    end)
                 end
             end)
         end
@@ -465,7 +759,6 @@ local function refreshTPList()
     tpScroll.CanvasSize = UDim2.new(0,0,0,#Players:GetPlayers()*36)
 end
 
--- toggle TP frame with animation
 local tpOpen = false
 tpBtn.MouseButton1Click:Connect(function()
     tpOpen = not tpOpen
@@ -482,107 +775,123 @@ tpBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-Players.PlayerAdded:Connect(refreshTPList)
-Players.PlayerRemoving:Connect(refreshTPList)
-
 -- ========== SETTINGS FRAME ==========
-local settingsFrame = Instance.new("Frame", frame)
-settingsFrame.Size = UDim2.new(0, 260, 0, 170)
+local settingsFrame = Instance.new("Frame")
+settingsFrame.Size = UDim2.new(0, 280, 0, 250)
 settingsFrame.Position = UDim2.new(0, 10, 0, 1000)
 settingsFrame.BackgroundColor3 = Color3.fromRGB(14,14,16)
 settingsFrame.BorderSizePixel = 0
+settingsFrame.Parent = frame
 Instance.new("UICorner", settingsFrame).CornerRadius = UDim.new(0,8)
 settingsFrame.Visible = false
 
-local sTitle = Instance.new("TextLabel", settingsFrame)
+local sTitle = Instance.new("TextLabel")
 sTitle.Size = UDim2.new(1, -16, 0, 28)
 sTitle.Position = UDim2.new(0, 8, 0, 8)
 sTitle.BackgroundTransparency = 1
-sTitle.Text = "Настройки"
+sTitle.Text = "Настройки и Темы"
 sTitle.TextColor3 = Color3.fromRGB(230,230,230)
 sTitle.TextScaled = true
 sTitle.Font = Enum.Font.GothamBold
+sTitle.Parent = settingsFrame
 
--- theme buttons
-local thLabel = Instance.new("TextLabel", settingsFrame)
-thLabel.Size = UDim2.new(1, -16, 0, 20)
-thLabel.Position = UDim2.new(0, 8, 0, 40)
-thLabel.BackgroundTransparency = 1
-thLabel.Text = "Тема:"
-thLabel.TextColor3 = Color3.fromRGB(180,180,180)
-thLabel.TextScaled = true
-thLabel.Font = Enum.Font.Gotham
+-- Theme grid
+local themeGrid = Instance.new("Frame")
+themeGrid.Size = UDim2.new(1, -16, 0, 130)
+themeGrid.Position = UDim2.new(0, 8, 0, 40)
+themeGrid.BackgroundTransparency = 1
+themeGrid.Parent = settingsFrame
 
-local function smallBtn(parent, txt, posX)
-    local b = Instance.new("TextButton", parent)
-    b.Size = UDim2.new(0, 72, 0, 28)
-    b.Position = UDim2.new(0, posX, 0, 64)
-    b.Text = txt
-    b.TextScaled = true
-    b.Font = Enum.Font.Gotham
-    b.TextColor3 = Color3.fromRGB(240,240,240)
-    b.BackgroundColor3 = Color3.fromRGB(40,40,40)
-    Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
-    return b
+local function createThemeButton(text, color, col, row, themeName, themeFunc)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.23, -2, 0, 28)
+    btn.Position = UDim2.new((col-1)*0.25, 0, (row-1)*0.25, 0)
+    btn.Text = text
+    btn.TextScaled = true
+    btn.Font = Enum.Font.Gotham
+    btn.TextColor3 = Color3.fromRGB(240,240,240)
+    btn.BackgroundColor3 = color
+    btn.BorderSizePixel = 0
+    btn.Parent = themeGrid
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
+    
+    btn.MouseButton1Click:Connect(function()
+        currentTheme = themeName
+        clearThemeEffects()
+        
+        if themeFunc then
+            themeFunc(frame)
+        end
+        
+        -- Применяем основные цвета темы
+        if themeName == "Dark" then
+            frame.BackgroundColor3 = Color3.fromRGB(18,18,20)
+            contentBg.BackgroundColor3 = Color3.fromRGB(22,22,24)
+            headerBg.BackgroundColor3 = Color3.fromRGB(28,28,30)
+        elseif themeName == "Light" then
+            frame.BackgroundColor3 = Color3.fromRGB(245,245,245)
+            contentBg.BackgroundColor3 = Color3.fromRGB(240,240,240)
+            headerBg.BackgroundColor3 = Color3.fromRGB(250,250,250)
+            title.TextColor3 = Color3.fromRGB(30,30,30)
+            sub.TextColor3 = Color3.fromRGB(80,80,80)
+        elseif themeName == "Neon" then
+            frame.BackgroundColor3 = Color3.fromRGB(30,4,40)
+            contentBg.BackgroundColor3 = Color3.fromRGB(22,12,30)
+            headerBg.BackgroundColor3 = Color3.fromRGB(50,20,60)
+            title.TextColor3 = Color3.fromRGB(255,220,255)
+            sub.TextColor3 = Color3.fromRGB(200,150,200)
+        elseif themeName == "Ocean" then
+            frame.BackgroundColor3 = Color3.fromRGB(10,20,40)
+            contentBg.BackgroundColor3 = Color3.fromRGB(15,25,45)
+            headerBg.BackgroundColor3 = Color3.fromRGB(20,40,70)
+            title.TextColor3 = Color3.fromRGB(180,220,255)
+            sub.TextColor3 = Color3.fromRGB(120,180,220)
+        elseif themeName == "Sunset" then
+            frame.BackgroundColor3 = Color3.fromRGB(40,20,10)
+            contentBg.BackgroundColor3 = Color3.fromRGB(50,30,20)
+            headerBg.BackgroundColor3 = Color3.fromRGB(70,40,25)
+            title.TextColor3 = Color3.fromRGB(255,200,180)
+            sub.TextColor3 = Color3.fromRGB(220,160,140)
+        elseif themeName == "Matrix" then
+            frame.BackgroundColor3 = Color3.fromRGB(10,20,10)
+            contentBg.BackgroundColor3 = Color3.fromRGB(15,30,15)
+            headerBg.BackgroundColor3 = Color3.fromRGB(20,40,20)
+            title.TextColor3 = Color3.fromRGB(180,255,180)
+            sub.TextColor3 = Color3.fromRGB(120,220,120)
+        elseif themeName == "Cyberpunk" then
+            frame.BackgroundColor3 = Color3.fromRGB(10,5,20)
+            contentBg.BackgroundColor3 = Color3.fromRGB(15,10,25)
+            headerBg.BackgroundColor3 = Color3.fromRGB(20,15,35)
+            title.TextColor3 = Color3.fromRGB(200,255,255)
+            sub.TextColor3 = Color3.fromRGB(150,200,200)
+        elseif themeName == "Forest" then
+            frame.BackgroundColor3 = Color3.fromRGB(10,30,15)
+            contentBg.BackgroundColor3 = Color3.fromRGB(15,40,20)
+            headerBg.BackgroundColor3 = Color3.fromRGB(20,50,25)
+            title.TextColor3 = Color3.fromRGB(200,255,200)
+            sub.TextColor3 = Color3.fromRGB(150,200,150)
+        end
+    end)
+    
+    return btn
 end
 
-local darkBtn = smallBtn(settingsFrame, "Dark", 0.04)
-local lightBtn = smallBtn(settingsFrame, "Light", 0.30)
-local neonBtn = smallBtn(settingsFrame, "Neon", 0.56)
+-- Создаем кнопки тем (4x4 сетка)
+createThemeButton("Dark", Color3.fromRGB(40,40,40), 1, 1, "Dark")
+createThemeButton("Light", Color3.fromRGB(100,100,120), 2, 1, "Light")
+createThemeButton("Neon", Color3.fromRGB(100,40,120), 3, 1, "Neon", createNeonEffects)
+createThemeButton("Ocean", Color3.fromRGB(30,80,120), 4, 1, "Ocean", createOceanEffects)
+createThemeButton("Sunset", Color3.fromRGB(120,60,40), 1, 2, "Sunset")
+createThemeButton("Matrix", Color3.fromRGB(40,120,60), 2, 2, "Matrix", createMatrixEffects)
+createThemeButton("Forest", Color3.fromRGB(40,100,60), 3, 2, "Forest")
+createThemeButton("Cyber", Color3.fromRGB(80,40,120), 4, 2, "Cyberpunk")
 
-darkBtn.MouseButton1Click:Connect(function()
-    currentTheme = "Dark"
-    frame.BackgroundColor3 = Color3.fromRGB(18,18,20)
-    contentBg.BackgroundColor3 = Color3.fromRGB(22,22,24)
-    title.TextColor3 = Color3.fromRGB(230,230,230)
-end)
-
-lightBtn.MouseButton1Click:Connect(function()
-    currentTheme = "Light"
-    frame.BackgroundColor3 = Color3.fromRGB(245,245,245)
-    contentBg.BackgroundColor3 = Color3.fromRGB(240,240,240)
-    title.TextColor3 = Color3.fromRGB(20,20,20)
-end)
-
-neonBtn.MouseButton1Click:Connect(function()
-    currentTheme = "Neon"
-    frame.BackgroundColor3 = Color3.fromRGB(30,4,40)
-    contentBg.BackgroundColor3 = Color3.fromRGB(22,12,30)
-    title.TextColor3 = Color3.fromRGB(255,220,255)
-end)
-
--- scan interval UI
-local scanLabel = Instance.new("TextLabel", settingsFrame)
-scanLabel.Size = UDim2.new(0.58, -12, 0, 20)
-scanLabel.Position = UDim2.new(0, 8, 0, 108)
-scanLabel.BackgroundTransparency = 1
-scanLabel.Text = "Интервал сканирования (с):"
-scanLabel.TextColor3 = Color3.fromRGB(180,180,180)
-scanLabel.TextScaled = true
-scanLabel.Font = Enum.Font.Gotham
-
-local scanBox = Instance.new("TextBox", settingsFrame)
-scanBox.Size = UDim2.new(0.34, -12, 0, 26)
-scanBox.Position = UDim2.new(0.62, 0, 0, 106)
-scanBox.Text = tostring(scanInterval)
-scanBox.ClearTextOnFocus = false
-scanBox.TextScaled = true
-Instance.new("UICorner", scanBox).CornerRadius = UDim.new(0,6)
-
-scanBox.FocusLost:Connect(function(enter)
-    local v = tonumber(scanBox.Text)
-    if v and v >= 0.1 then
-        scanInterval = v
-        scanBox.Text = tostring(scanInterval)
-    else
-        scanBox.Text = tostring(scanInterval)
-    end
-end)
-
+local settingsOpen = false
 settingsBtn.MouseButton1Click:Connect(function()
-    settingsFrame.Visible = not settingsFrame.Visible
-    if settingsFrame.Visible then
-        settingsFrame.Position = UDim2.new(0, 10, 0, 120)
+    settingsOpen = not settingsOpen
+    if settingsOpen then
+        settingsFrame.Visible = true
+        settingsFrame.Position = UDim2.new(0, 10, 0, 600)
         tween(settingsFrame, {Position = UDim2.new(0, 10, 0, 120)}, 0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     else
         tween(settingsFrame, {Position = UDim2.new(0, 10, 0, 1000)}, 0.12)
@@ -593,15 +902,16 @@ settingsBtn.MouseButton1Click:Connect(function()
 end)
 
 -- ========== HIGHLIGHT SETTINGS FRAME ==========
-local highlightSettingsFrame = Instance.new("Frame", frame)
-highlightSettingsFrame.Size = UDim2.new(0, 280, 0, 380)
+local highlightSettingsFrame = Instance.new("Frame")
+highlightSettingsFrame.Size = UDim2.new(0, 280, 0, 400)
 highlightSettingsFrame.Position = UDim2.new(0, 10, 0, 1000)
 highlightSettingsFrame.BackgroundColor3 = Color3.fromRGB(14,14,16)
 highlightSettingsFrame.BorderSizePixel = 0
+highlightSettingsFrame.Parent = frame
 Instance.new("UICorner", highlightSettingsFrame).CornerRadius = UDim.new(0,8)
 highlightSettingsFrame.Visible = false
 
-local hsTitle = Instance.new("TextLabel", highlightSettingsFrame)
+local hsTitle = Instance.new("TextLabel")
 hsTitle.Size = UDim2.new(1, -16, 0, 28)
 hsTitle.Position = UDim2.new(0, 8, 0, 8)
 hsTitle.BackgroundTransparency = 1
@@ -609,25 +919,28 @@ hsTitle.Text = "Настройки подсветок"
 hsTitle.TextColor3 = Color3.fromRGB(230,230,230)
 hsTitle.TextScaled = true
 hsTitle.Font = Enum.Font.GothamBold
+hsTitle.Parent = highlightSettingsFrame
 
-local hsScroll = Instance.new("ScrollingFrame", highlightSettingsFrame)
-hsScroll.Size = UDim2.new(1, -16, 1, -52)
+local hsScroll = Instance.new("ScrollingFrame")
+hsScroll.Size = UDim2.new(1, -16, 1, -100)
 hsScroll.Position = UDim2.new(0, 8, 0, 44)
 hsScroll.CanvasSize = UDim2.new(0,0,0,600)
 hsScroll.ScrollBarThickness = 6
 hsScroll.BackgroundTransparency = 1
+hsScroll.Parent = highlightSettingsFrame
 
-local hsLayout = Instance.new("UIListLayout", hsScroll)
+local hsLayout = Instance.new("UIListLayout")
 hsLayout.Padding = UDim.new(0,8)
+hsLayout.Parent = hsScroll
 
--- Функция для создания слайдера настройки
-local function createHighlightSlider(settingName, displayName, defaultValue, yPos)
-    local container = Instance.new("Frame", hsScroll)
+local function createHighlightSlider(settingName, displayName)
+    local container = Instance.new("Frame")
     container.Size = UDim2.new(1, 0, 0, 60)
     container.BackgroundTransparency = 1
+    container.Parent = hsScroll
     
-    local label = Instance.new("TextLabel", container)
-    label.Size = UDim2.new(1, 0, 0, 20)
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1, -50, 0, 20)
     label.Position = UDim2.new(0, 0, 0, 0)
     label.BackgroundTransparency = 1
     label.Text = displayName
@@ -635,73 +948,110 @@ local function createHighlightSlider(settingName, displayName, defaultValue, yPo
     label.TextScaled = true
     label.Font = Enum.Font.Gotham
     label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = container
     
-    local valueLabel = Instance.new("TextLabel", container)
+    local valueLabel = Instance.new("TextLabel")
     valueLabel.Size = UDim2.new(0, 40, 0, 20)
     valueLabel.Position = UDim2.new(1, -40, 0, 0)
     valueLabel.BackgroundTransparency = 1
-    valueLabel.Text = tostring(highlightSettings[settingName])
+    valueLabel.Text = string.format("%.1f", highlightSettings[settingName])
     valueLabel.TextColor3 = Color3.fromRGB(150,150,255)
     valueLabel.TextScaled = true
     valueLabel.Font = Enum.Font.GothamBold
+    valueLabel.Parent = container
     
-    local slider = Instance.new("Frame", container)
-    slider.Size = UDim2.new(1, 0, 0, 20)
-    slider.Position = UDim2.new(0, 0, 0, 30)
-    slider.BackgroundColor3 = Color3.fromRGB(40,40,40)
-    Instance.new("UICorner", slider).CornerRadius = UDim.new(0,4)
+    local sliderBg = Instance.new("Frame")
+    sliderBg.Size = UDim2.new(1, 0, 0, 20)
+    sliderBg.Position = UDim2.new(0, 0, 0, 30)
+    sliderBg.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    sliderBg.Parent = container
+    Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(0,4)
     
-    local fill = Instance.new("Frame", slider)
+    local fill = Instance.new("Frame")
     fill.Size = UDim2.new(highlightSettings[settingName], 0, 1, 0)
     fill.Position = UDim2.new(0,0,0,0)
     fill.BackgroundColor3 = Color3.fromRGB(80,120,255)
     fill.BorderSizePixel = 0
+    fill.Parent = sliderBg
     Instance.new("UICorner", fill).CornerRadius = UDim.new(0,4)
     
-    local sliderBtn = Instance.new("TextButton", slider)
+    local function updateValue(value)
+        value = math.clamp(value, 0, 1)
+        highlightSettings[settingName] = value
+        valueLabel.Text = string.format("%.1f", value)
+        fill.Size = UDim2.new(value, 0, 1, 0)
+        updateHighlights()
+    end
+    
+    local sliderBtn = Instance.new("TextButton")
     sliderBtn.Size = UDim2.new(1,0,1,0)
     sliderBtn.BackgroundTransparency = 1
     sliderBtn.Text = ""
+    sliderBtn.Parent = sliderBg
     
     sliderBtn.MouseButton1Down:Connect(function()
         local connection
         connection = RunService.RenderStepped:Connect(function()
             local mouse = UserInputService:GetMouseLocation()
-            local sliderAbsPos = slider.AbsolutePosition
-            local sliderAbsSize = slider.AbsoluteSize
+            local sliderAbsPos = sliderBg.AbsolutePosition
+            local sliderAbsSize = sliderBg.AbsoluteSize
             
             local relativeX = (mouse.X - sliderAbsPos.X) / sliderAbsSize.X
-            relativeX = math.clamp(relativeX, 0, 1)
-            
-            highlightSettings[settingName] = relativeX
-            valueLabel.Text = string.format("%.2f", relativeX)
-            fill.Size = UDim2.new(relativeX, 0, 1, 0)
+            updateValue(relativeX)
         end)
         
-        local function disconnect()
-            connection:Disconnect()
-            UserInputService.MouseButton1Up:Wait()
-        end
-        disconnect()
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                connection:Disconnect()
+            end
+        end)
     end)
     
     return container
 end
 
--- Создаем слайдеры для настроек подсветок
-createHighlightSlider("palletFillTransparency", "Палеты: прозрачность заливки", 0.3, 0)
-createHighlightSlider("palletOutlineTransparency", "Палеты: прозрачность контура", 0, 70)
-createHighlightSlider("genFillTransparency", "Генераторы: прозрачность заливки", 0.3, 140)
-createHighlightSlider("genOutlineTransparency", "Генераторы: прозрачность контура", 0, 210)
-createHighlightSlider("playerFillTransparency", "Игроки: прозрачность заливки", 0.3, 280)
-createHighlightSlider("playerOutlineTransparency", "Игроки: прозрачность контура", 0, 350)
-createHighlightSlider("killerFillTransparency", "Убийца: прозрачность заливки", 0.3, 420)
-createHighlightSlider("killerOutlineTransparency", "Убийца: прозрачность контура", 0, 490)
+-- Создаем слайдеры
+createHighlightSlider("palletFillTransparency", "Палеты: прозрачность")
+createHighlightSlider("palletOutlineTransparency", "Палеты: контур")
+createHighlightSlider("genFillTransparency", "Генераторы: прозрачность")
+createHighlightSlider("genOutlineTransparency", "Генераторы: контур")
+createHighlightSlider("playerFillTransparency", "Игроки: прозрачность")
+createHighlightSlider("playerOutlineTransparency", "Игроки: контур")
+createHighlightSlider("killerFillTransparency", "Убийца: прозрачность")
+createHighlightSlider("killerOutlineTransparency", "Убийца: контур")
 
--- toggle highlight settings frame
+-- Кнопка включения/выключения
+local toggleAllBtn = Instance.new("TextButton")
+toggleAllBtn.Size = UDim2.new(1, -16, 0, 32)
+toggleAllBtn.Position = UDim2.new(0, 8, 1, -40)
+toggleAllBtn.BackgroundColor3 = highlightSettings.enabled and Color3.fromRGB(60,120,60) or Color3.fromRGB(120,60,60)
+toggleAllBtn.Text = highlightSettings.enabled and "Подсветки: ВКЛ" or "Подсветки: ВЫКЛ"
+toggleAllBtn.TextColor3 = Color3.fromRGB(240,240,240)
+toggleAllBtn.TextScaled = true
+toggleAllBtn.Font = Enum.Font.GothamBold
+toggleAllBtn.Parent = highlightSettingsFrame
+Instance.new("UICorner", toggleAllBtn).CornerRadius = UDim.new(0,6)
+
+toggleAllBtn.MouseButton1Click:Connect(function()
+    highlightSettings.enabled = not highlightSettings.enabled
+    toggleAllBtn.BackgroundColor3 = highlightSettings.enabled and Color3.fromRGB(60,120,60) or Color3.fromRGB(120,60,60)
+    toggleAllBtn.Text = highlightSettings.enabled and "Подсветки: ВКЛ" or "Подсветки: ВЫКЛ"
+    
+    if not highlightSettings.enabled then
+        for obj, highlight in pairs(activeHighlights) do
+            pcall(function() highlight:Destroy() end)
+        end
+        activeHighlights = {}
+    else
+        updateHighlights()
+    end
+end)
+
+local highlightSettingsOpen = false
 highlightSettingsBtn.MouseButton1Click:Connect(function()
-    highlightSettingsFrame.Visible = not highlightSettingsFrame.Visible
-    if highlightSettingsFrame.Visible then
+    highlightSettingsOpen = not highlightSettingsOpen
+    if highlightSettingsOpen then
+        highlightSettingsFrame.Visible = true
         highlightSettingsFrame.Position = UDim2.new(0, 10, 0, 600)
         tween(highlightSettingsFrame, {Position = UDim2.new(0, 10, 0, 120)}, 0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     else
@@ -712,149 +1062,6 @@ highlightSettingsBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- ========== CLOSE BEHAVIOR ==========
-closeBtn.MouseButton1Click:Connect(function()
-    for _,c in ipairs(createdButtons) do
-        c.set(false)
-    end
-    -- remove highlights
-    for _,obj in ipairs(workspace:GetDescendants()) do
-        if obj:FindFirstChild("Highlight") then
-            pcall(function() obj.Highlight:Destroy() end)
-        end
-    end
-    for _,plr in ipairs(Players:GetPlayers()) do
-        if plr.Character and plr.Character:FindFirstChild("Highlight") then
-            pcall(function() plr.Character.Highlight:Destroy() end)
-        end
-    end
-    gui:Destroy()
-end)
-
--- ========== HIGHLIGHT / ESP LOGIC ==========
-local function safeSetHighlight(obj, color, fillTransparency, outlineTransparency)
-    if not obj then return end
-    -- destroy old highlight if exists
-    for _, child in ipairs(obj:GetChildren()) do
-        if child:IsA("Highlight") then
-            pcall(function() child:Destroy() end)
-        end
-    end
-    
-    local ok, h = pcall(function()
-        local H = Instance.new("Highlight")
-        H.FillColor = color
-        H.FillTransparency = fillTransparency or 0.3
-        H.OutlineTransparency = outlineTransparency or 0
-        H.OutlineColor = Color3.new(1,1,1)
-        H.Parent = obj
-        return H
-    end)
-    
-    if not ok then
-        -- fallback attempt attach to PrimaryPart if obj:IsA("Model") and obj.PrimaryPart then
-        if obj:IsA("Model") and obj.PrimaryPart then
-            pcall(function()
-                local H2 = Instance.new("Highlight")
-                H2.FillColor = color
-                H2.FillTransparency = fillTransparency or 0.3
-                H2.OutlineTransparency = outlineTransparency or 0
-                H2.OutlineColor = Color3.new(1,1,1)
-                H2.Parent = obj.PrimaryPart
-            end)
-        end
-    end
-end
-
-local function safeRemoveHighlight(obj)
-    if not obj then return end
-    for _, child in ipairs(obj:GetChildren()) do
-        if child:IsA("Highlight") then
-            pcall(function() child:Destroy() end)
-        end
-    end
-end
-
-local function updateObjects()
-    for _,obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") then
-            if obj.Name == PALLET_NAME then
-                local cb = nil
-                for _,c in ipairs(createdButtons) do
-                    if c.name == "Палеты" then cb = c; break end
-                end
-                if cb and cb.get() then
-                    safeSetHighlight(obj, PALLET_COLOR, highlightSettings.palletFillTransparency, highlightSettings.palletOutlineTransparency)
-                else
-                    safeRemoveHighlight(obj)
-                end
-            elseif obj.Name == GEN_NAME then
-                local cb = nil
-                for _,c in ipairs(createdButtons) do
-                    if c.name == "Генераторы" then cb = c; break end
-                end
-                if cb and cb.get() then
-                    safeSetHighlight(obj, GEN_COLOR, highlightSettings.genFillTransparency, highlightSettings.genOutlineTransparency)
-                else
-                    safeRemoveHighlight(obj)
-                end
-            end
-        end
-    end
-end
-
-local function updatePlayers()
-    for _,plr in ipairs(Players:GetPlayers()) do
-        -- Исключаем локального игрока из подсветки
-        if plr ~= player and plr.Character then
-            local killer = isKiller(plr)
-            local killerCB, playersCB
-            for _,c in ipairs(createdButtons) do
-                if c.name == "Убийца" then killerCB = c end
-                if c.name == "Игроки" then playersCB = c end
-            end
-            
-            if killer and killerCB and killerCB.get() then
-                safeSetHighlight(plr.Character, KILLER_COLOR, highlightSettings.killerFillTransparency, highlightSettings.killerOutlineTransparency)
-            elseif (not killer) and playersCB and playersCB.get() then
-                safeSetHighlight(plr.Character, PLAYER_COLOR, highlightSettings.playerFillTransparency, highlightSettings.playerOutlineTransparency)
-            else
-                safeRemoveHighlight(plr.Character)
-            end
-        end
-    end
-end
-
-local function updateCollision()
-    local collCB
-    for _,c in ipairs(createdButtons) do
-        if c.name == "Коллизия" then collCB = c; break end
-    end
-    if player.Character and collCB then
-        for _,part in ipairs(player.Character:GetDescendants()) do
-            if part:IsA("BasePart") then
-                pcall(function() part.CanCollide = collCB.get() end)
-            end
-        end
-    end
-end
-
-local function updateJump()
-    local jCB
-    for _,c in ipairs(createdButtons) do
-        if c.name == "Прыжок" then jCB = c; break end
-    end
-    if player.Character and player.Character:FindFirstChild("Humanoid") and jCB then
-        local hum = player.Character.Humanoid
-        if jCB.get() then
-            hum.JumpPower = 50
-            hum.UseJumpPower = true
-        else
-            hum.JumpPower = 0
-        end
-    end
-end
-
 -- ========== KEY BIND HANDLING ==========
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
@@ -862,14 +1069,16 @@ UserInputService.InputBegan:Connect(function(input, gp)
         local list = keyToButtons[input.KeyCode.Name]
         if list then
             for _, btn in ipairs(list) do
-                -- find createdButtons entry
                 for _,c in ipairs(createdButtons) do
                     if c.btn == btn then
-                        c.set(not c.get()) -- toggle
-                        -- brief feedback animation
+                        c.set(not c.get())
                         tween(c.btn, {BackgroundColor3 = Color3.fromRGB(95,95,95)}, 0.06)
                         task.delay(0.08, function()
-                            tween(c.btn, {BackgroundColor3 = Color3.fromRGB(38,38,40)}, 0.12)
+                            if c.get() then
+                                c.btn.BackgroundColor3 = Color3.fromRGB(60,110,60)
+                            else
+                                c.btn.BackgroundColor3 = Color3.fromRGB(38,38,40)
+                            end
                         end)
                     end
                 end
@@ -878,55 +1087,44 @@ UserInputService.InputBegan:Connect(function(input, gp)
     end
 end)
 
--- ensure bind labels show initial state
-for _,c in ipairs(createdButtons) do
-    setBind(c.btn, c.bindLabel)
-end
-
--- ========== REFRESH TP LIST PERIODICALLY ==========
-spawn(function()
-    while gui.Parent do
-        refreshTPList()
-        task.wait(1.1)
+-- ========== CLOSE BEHAVIOR ==========
+closeBtn.MouseButton1Click:Connect(function()
+    for _,c in ipairs(createdButtons) do
+        c.set(false)
     end
+    
+    for obj, highlight in pairs(activeHighlights) do
+        pcall(function() highlight:Destroy() end)
+    end
+    activeHighlights = {}
+    
+    if nightModeEnabled then
+        toggleNightMode()
+    end
+    
+    clearThemeEffects()
+    gui:Destroy()
 end)
 
--- ========== MAIN LOOP ==========
-spawn(function()
-    while gui.Parent do
-        local ok = pcall(function()
-            updateObjects()
-            updatePlayers()
-            updateCollision()
-            updateJump()
-        end)
-        if not ok then
-            -- ignore
-        end
-        task.wait(math.max(0.1, scanInterval or DEFAULT_SCAN_INTERVAL))
-    end
-end)
-
--- ========== FINISH SETUP: set initial labels & binds ==========
--- set names and initial state texts correctly
-for _,c in ipairs(createdButtons) do
-    -- already set in creation; ensure bind label text shows
-    if c.bindLabel then
-        if binds[c.btn] then
-            c.bindLabel.Text = "Bind: " .. binds[c.btn].Name
-        else
-            c.bindLabel.Text = "Bind: -"
-        end
-    end
-end
-
--- initial TP list fill
+-- ========== INITIALIZATION ==========
 refreshTPList()
 
-print("Stylish FinderMenu v2 loaded.")
+-- Автоматическое обновление подсветок при изменениях
+spawn(function()
+    while gui and gui.Parent do
+        updateHighlights()
+        task.wait(0.5)
+    end
+end)
+
+-- Обновление списка телепорта при изменениях
+Players.PlayerAdded:Connect(refreshTPList)
+Players.PlayerRemoving:Connect(refreshTPList)
+
+print("Stylish FinderMenu v5 - WORKING VERSION loaded successfully!")
 
 -- MovementMenu v5 — CUSTOMIZABLE DASH WITH SETTINGS
--- Полная настройка деша
+-- Полная настройка даша + правильное восстановление скорости
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
