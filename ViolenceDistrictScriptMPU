@@ -1,4 +1,4 @@
--- Stylish FinderMenu v5 - WORKING VERSION
+-- Stylish FinderMenu v7 - FIXED THEMES
 
 -- ========== CONFIG ==========
 local PALLET_NAME = "Palletwrong"
@@ -25,6 +25,8 @@ local nightModeEnabled = false
 local menuMinimized = false
 local activeHighlights = {}
 local themeEffects = {}
+local themeConnections = {}
+local isUpdating = false
 
 -- Настройки подсветок
 local highlightSettings = {
@@ -45,6 +47,25 @@ local function tween(obj, props, time, style, dir)
     local t = TweenService:Create(obj, info, props)
     t:Play()
     return t
+end
+
+-- ========== THEME EFFECTS CLEAR SYSTEM ==========
+local function clearThemeEffects()
+    -- Останавливаем все активные циклы анимаций
+    for _, connection in pairs(themeConnections) do
+        if connection then
+            connection:Disconnect()
+        end
+    end
+    themeConnections = {}
+    
+    -- Удаляем все визуальные эффекты
+    for _, effect in pairs(themeEffects) do
+        if effect and effect.Parent then
+            pcall(function() effect:Destroy() end)
+        end
+    end
+    themeEffects = {}
 end
 
 -- ========== NOTIFICATION SYSTEM ==========
@@ -87,80 +108,160 @@ local function showNotification(message, duration)
     end)
 end
 
--- ========== THEME EFFECTS SYSTEM ==========
-local function clearThemeEffects()
-    for _, effect in pairs(themeEffects) do
-        if effect then
-            effect:Destroy()
-        end
-    end
-    themeEffects = {}
-end
-
--- Простые эффекты для тем
+-- ========== THEME EFFECTS SYSTEMS ==========
+-- OCEAN THEME
 local function createOceanEffects(parent)
-    clearThemeEffects()
-    
-    -- Волны
-    local waves = Instance.new("Frame")
-    waves.Size = UDim2.new(1, 0, 0, 4)
-    waves.Position = UDim2.new(0, 0, 0, 0)
-    waves.BackgroundTransparency = 1
-    waves.Parent = parent
-    themeEffects.waves = waves
-    
-    for i = 1, 3 do
-        local wave = Instance.new("Frame")
-        wave.Size = UDim2.new(0.3, 0, 1, 0)
-        wave.Position = UDim2.new((i-1)*0.3, 0, 0, 0)
-        wave.BackgroundColor3 = Color3.fromRGB(100,200,255)
-        wave.BackgroundTransparency = 0.7
-        wave.BorderSizePixel = 0
-        wave.Parent = waves
-        
-        spawn(function()
-            while waves.Parent do
-                tween(wave, {Position = UDim2.new((i-1)*0.3 + 0.1, 0, 0, 0)}, 2, Enum.EasingStyle.Linear)
-                task.wait(2)
-                wave.Position = UDim2.new((i-1)*0.3 - 0.1, 0, 0, 0)
-            end
-        end)
-    end
-    
-    -- Рыбки
     local fishContainer = Instance.new("Frame")
     fishContainer.Size = UDim2.new(1, 0, 1, 0)
     fishContainer.BackgroundTransparency = 1
+    fishContainer.ClipsDescendants = true
     fishContainer.Parent = parent
     themeEffects.fishContainer = fishContainer
     
-    local fishEmojis = {"🐠", "🐟", "🐡", "🦈"}
-    for i = 1, 4 do
+    local fishEmojis = {"."}
+    local activeFish = {}
+    
+    local function createFish()
         local fish = Instance.new("TextLabel")
-        fish.Size = UDim2.new(0, 30, 0, 30)
-        fish.Position = UDim2.new(math.random() * 0.8, 0, math.random() * 0.8, 0)
+        local size = math.random(25, 40)
+        fish.Size = UDim2.new(0, size, 0, size)
+        fish.AnchorPoint = Vector2.new(0.5, 0.5)
         fish.BackgroundTransparency = 1
-        fish.Text = fishEmojis[i]
+        fish.Text = fishEmojis[math.random(#fishEmojis)]
         fish.TextScaled = true
-        fish.TextColor3 = Color3.fromRGB(255,255,200)
+        fish.TextColor3 = Color3.fromRGB(255, 255, 200)
         fish.Font = Enum.Font.Gotham
+        fish.TextTransparency = 1
         fish.Parent = fishContainer
         
-        spawn(function()
-            while fish.Parent do
-                tween(fish, {
-                    Position = UDim2.new(math.random() * 0.8, 0, math.random() * 0.8, 0)
-                }, math.random(3,6), Enum.EasingStyle.Sine)
-                task.wait(math.random(4,8))
+        -- Случайное направление (слева или справа)
+        local direction = math.random() > 0.5 and 1 or -1
+        local startX = direction == 1 and -0.1 or 1.1
+        local startY = math.random(0.1, 0.9)
+        
+        fish.Position = UDim2.new(startX, 0, startY, 0)
+        
+        -- Плавное появление
+        tween(fish, {TextTransparency = 0}, 0.8, Enum.EasingStyle.Quad)
+        
+        -- Параметры движения
+        local swimSpeed = math.random(50, 100) / 1000  -- 0.05 - 0.1
+        local waveAmplitude = math.random(1, 3) / 1000  -- 0.001 - 0.003
+        local waveFrequency = math.random(1, 3)
+        
+        -- Случайная задержка для разнообразия
+        task.wait(math.random(0, 2))
+        
+        local connection
+        local clockOffset = math.random() * 10
+        local lifetime = math.random(15, 30) -- Время жизни рыбки
+        
+        connection = RunService.Heartbeat:Connect(function(deltaTime)
+            if not fish.Parent then 
+                connection:Disconnect()
+                return 
+            end
+            
+            local currentPos = fish.Position
+            local time = os.clock() + clockOffset
+            
+            -- Движение по X
+            local newX = currentPos.X.Scale + direction * swimSpeed * deltaTime * 30
+            
+            -- Волнообразное движение по Y
+            local newY = startY + math.sin(time * waveFrequency) * waveAmplitude * deltaTime * 30
+            
+            -- Плавное исчезновение при приближении к краю
+            local edgeDistance = direction == 1 and (1 - newX) or newX
+            if edgeDistance < 0.2 then
+                fish.TextTransparency = 1 - (edgeDistance / 0.2)
+            elseif edgeDistance > 0.8 then
+                fish.TextTransparency = (edgeDistance - 0.8) / 0.2
+            else
+                fish.TextTransparency = 0
+            end
+            
+            fish.Position = UDim2.new(newX, 0, newY, 0)
+            
+            -- Если рыбка ушла за пределы экрана
+            if (direction == 1 and newX > 1.2) or (direction == -1 and newX < -0.2) then
+                connection:Disconnect()
+                fish:Destroy()
+                activeFish[fish] = nil
+                
+                -- Создаем новую рыбку через случайное время
+                task.wait(math.random(1, 4))
+                createFish()
+            end
+        end)
+        
+        activeFish[fish] = connection
+        table.insert(themeConnections, connection)
+        
+        -- Автоматическое удаление через время жизни
+        task.spawn(function()
+            task.wait(lifetime)
+            if fish.Parent then
+                -- Плавное исчезновение
+                tween(fish, {TextTransparency = 1}, 1, Enum.EasingStyle.Quad)
+                task.wait(1)
+                if connection then connection:Disconnect() end
+                fish:Destroy()
+                activeFish[fish] = nil
+                
+                -- Создаем новую рыбку
+                task.wait(math.random(1, 3))
+                createFish()
+            end
+        end)
+    end
+    
+    -- Создаем начальных рыбок
+    for i = 1, 8 do
+        task.spawn(function()
+            task.wait(math.random(0, 2) * i) -- Разное время появления
+            createFish()
+        end)
+    end
+    
+    -- Пузырьки
+    for i = 1, 6 do
+        local bubble = Instance.new("Frame")
+        local size = math.random(5, 15)
+        bubble.Size = UDim2.new(0, size, 0, size)
+        bubble.AnchorPoint = Vector2.new(0.5, 0.5)
+        bubble.Position = UDim2.new(math.random(), 0, 1, 0)
+        bubble.BackgroundColor3 = Color3.fromRGB(200, 230, 255)
+        bubble.BackgroundTransparency = 0.7
+        bubble.BorderSizePixel = 0
+        bubble.Parent = parent
+        Instance.new("UICorner", bubble).CornerRadius = UDim.new(1, 0)
+        
+        task.spawn(function()
+            while bubble.Parent do
+                local startX = math.random()
+                local startPos = UDim2.new(startX, 0, 1, 0)
+                bubble.Position = startPos
+                bubble.BackgroundTransparency = 0.7
+                
+                -- Случайное смещение по X во время всплытия
+                local endX = startX + (math.random() * 0.2 - 0.1) -- ±0.1
+                endX = math.clamp(endX, 0, 1)
+                
+                -- Всплытие с плавным исчезновением
+                tween(bubble, {
+                    Position = UDim2.new(endX, 0, -0.1, 0),
+                    BackgroundTransparency = 1
+                }, math.random(2, 5), Enum.EasingStyle.Linear)
+                
+                task.wait(math.random(3, 6))
             end
         end)
     end
 end
 
+-- NEON THEME
 local function createNeonEffects(parent)
-    clearThemeEffects()
-    
-    -- Пульсирующее свечение
     local glow = Instance.new("Frame")
     glow.Size = UDim2.new(1, 20, 1, 20)
     glow.Position = UDim2.new(0, -10, 0, -10)
@@ -168,43 +269,47 @@ local function createNeonEffects(parent)
     glow.BackgroundTransparency = 0.9
     glow.BorderSizePixel = 0
     glow.Parent = parent
-    Instance.new("UICorner", glow).CornerRadius = UDim.new(0,16)
+    Instance.new("UICorner", glow).CornerRadius = UDim.new(0,20)
     themeEffects.glow = glow
     
     spawn(function()
         while glow.Parent do
-            tween(glow, {BackgroundTransparency = 0.8}, 0.5, Enum.EasingStyle.Sine)
-            task.wait(0.5)
-            tween(glow, {BackgroundTransparency = 0.9}, 0.5, Enum.EasingStyle.Sine)
-            task.wait(0.5)
+            tween(glow, {BackgroundTransparency = 0.8}, 0.8, Enum.EasingStyle.Sine)
+            task.wait(0.8)
+            tween(glow, {BackgroundTransparency = 0.9}, 0.8, Enum.EasingStyle.Sine)
+            task.wait(0.8)
         end
     end)
     
-    -- Неоновые линии
-    for i = 1, 2 do
+    -- Движущиеся неоновые полосы
+    for i = 0, 0 do
         local line = Instance.new("Frame")
-        line.Size = UDim2.new(1, 0, 0, 2)
-        line.Position = UDim2.new(0, 0, i/3 - 0.1, 0)
+        line.Size = UDim2.new(0, 0, 0, 0)
+        line.Position = UDim2.new((i-1)/3, 0, 0, 0)
         line.BackgroundColor3 = Color3.fromRGB(255,50,255)
+        line.BackgroundTransparency = 0
         line.BorderSizePixel = 0
-        line.BackgroundTransparency = 0.3
         line.Parent = parent
         
         spawn(function()
-            local dir = 1
+            local direction = 1
             while line.Parent do
-                tween(line, {BackgroundTransparency = dir == 1 and 0.1 or 0.5}, 0.3)
-                dir = -dir
-                task.wait(0.3)
+                local targetX = line.Position.X.Scale + direction * 0.33
+                if targetX > 1 then direction = -1 end
+                if targetX < 0 then direction = 1 end
+                
+                tween(line, {
+                    Position = UDim2.new(targetX, 0, 0, 0),
+                    BackgroundColor3 = direction == 1 and Color3.fromRGB(50,255,255) or Color3.fromRGB(255,50,255)
+                }, 2, Enum.EasingStyle.Sine)
+                task.wait(2)
             end
         end)
     end
 end
 
+-- MATRIX THEME
 local function createMatrixEffects(parent)
-    clearThemeEffects()
-    
-    -- Матричный код
     local codeContainer = Instance.new("Frame")
     codeContainer.Size = UDim2.new(1, 0, 1, 0)
     codeContainer.BackgroundTransparency = 1
@@ -213,10 +318,10 @@ local function createMatrixEffects(parent)
     
     local matrixChars = {"0", "1", "ﾊ", "ﾐ", "ﾋ", "ｰ", "ｳ", "ｼ", "ﾅ", "ﾓ", "ﾆ", "ｻ", "ﾜ", "ﾂ", "ｵ", "ﾘ", "ｱ", "ﾎ", "ﾃ", "ﾏ", "ｹ", "ﾒ", "ｴ", "ｶ", "ｷ", "ﾑ", "ﾕ", "ﾗ", "ｾ", "ﾈ", "ｽ", "ﾀ", "ﾇ", "ﾍ", "ｦ", "ｲ", "ｸ", "ｺ", "ｿ", "ﾁ", "ﾄ", "ﾉ", "ﾌ", "ｴ", "ｵ", "ﾑ", "ﾕ", "ﾗ"}
     
-    for i = 1, 20 do
+    for i = 1, 18 do
         local char = Instance.new("TextLabel")
-        char.Size = UDim2.new(0, 20, 0, 20)
-        char.Position = UDim2.new(math.random(), 0, 0, -40)
+        char.Size = UDim2.new(0, 15, 0, 20)
+        char.Position = UDim2.new(math.random(), 0, 0, -30)
         char.BackgroundTransparency = 1
         char.Text = matrixChars[math.random(#matrixChars)]
         char.TextColor3 = Color3.fromRGB(0,255,0)
@@ -228,15 +333,317 @@ local function createMatrixEffects(parent)
         spawn(function()
             while char.Parent do
                 char.Text = matrixChars[math.random(#matrixChars)]
-                char.Position = UDim2.new(math.random(), 0, 0, -40)
+                char.Position = UDim2.new(math.random(), 0, 0, -30)
                 char.TextTransparency = 0.3
                 
                 tween(char, {
-                    Position = UDim2.new(char.Position.X.Scale, 0, 1, 40),
+                    Position = UDim2.new(char.Position.X.Scale, 0, 1, 30),
                     TextTransparency = 1
-                }, math.random(2,4), Enum.EasingStyle.Linear)
+                }, math.random(1,3), Enum.EasingStyle.Linear)
                 
+                task.wait(math.random(1,3) + math.random(0.5,2))
+            end
+        end)
+    end
+end
+
+-- FIRE THEME
+local function createFireEffects(parent)
+    local fireContainer = Instance.new("Frame")
+    fireContainer.Size = UDim2.new(1, 0, 0, 25)
+    fireContainer.Position = UDim2.new(0, 0, 1, -25)
+    fireContainer.BackgroundTransparency = 1
+    fireContainer.Parent = parent
+    themeEffects.fireContainer = fireContainer
+    
+    for i = 1, 8 do
+        local flame = Instance.new("Frame")
+        flame.Size = UDim2.new(0.125, 0, 0, math.random(20,35))
+        flame.Position = UDim2.new((i-1)*0.125, 0, 0, 0)
+        flame.BackgroundColor3 = Color3.fromRGB(255, math.random(100,200), 0)
+        flame.BackgroundTransparency = 0.6
+        flame.BorderSizePixel = 0
+        flame.Parent = fireContainer
+        themeEffects["flame"..i] = flame
+        
+        spawn(function()
+            while flame.Parent do
+                tween(flame, {
+                    Size = UDim2.new(0.125, 0, 0, math.random(25,40)),
+                    BackgroundColor3 = Color3.fromRGB(255, math.random(150,255), math.random(0,100))
+                }, 0.3, Enum.EasingStyle.Sine)
+                task.wait(0.3)
+                tween(flame, {
+                    Size = UDim2.new(0.125, 0, 0, math.random(20,35)),
+                    BackgroundColor3 = Color3.fromRGB(255, math.random(100,200), 0)
+                }, 0.3, Enum.EasingStyle.Sine)
+                task.wait(0.3)
+            end
+        end)
+    end
+end
+
+-- LAVA THEME
+local function createLavaEffects(parent)
+    local lavaContainer = Instance.new("Frame")
+    lavaContainer.Size = UDim2.new(1, 0, 0, 35)
+    lavaContainer.Position = UDim2.new(0, 0, 1, -35)
+    lavaContainer.BackgroundColor3 = Color3.fromRGB(200, 50, 0)
+    lavaContainer.BackgroundTransparency = 0.3
+    lavaContainer.Parent = parent
+    themeEffects.lavaContainer = lavaContainer
+    
+    -- Пузыри лавы
+    for i = 1, 6 do
+        local bubble = Instance.new("Frame")
+        local size = math.random(8, 15)
+        bubble.Size = UDim2.new(0, size, 0, size)
+        bubble.Position = UDim2.new(math.random(), 0, 1, 0)
+        bubble.BackgroundColor3 = Color3.fromRGB(255, 100, 0)
+        bubble.BackgroundTransparency = 0.4
+        bubble.BorderSizePixel = 0
+        bubble.Parent = parent
+        Instance.new("UICorner", bubble).CornerRadius = UDim.new(1,0)
+        themeEffects["lavaBubble"..i] = bubble
+        
+        spawn(function()
+            while bubble.Parent do
+                bubble.Position = UDim2.new(math.random(), 0, 1, 0)
+                bubble.BackgroundTransparency = 0.4
+                
+                tween(bubble, {
+                    Position = UDim2.new(bubble.Position.X.Scale, 0, 0.5, 0),
+                    BackgroundTransparency = 1,
+                    Size = UDim2.new(0, size + 5, 0, size + 5)
+                }, math.random(2,3), Enum.EasingStyle.Quad)
+                
+                task.wait(math.random(2,3) + math.random(1,2))
+            end
+        end)
+    end
+end
+
+-- CYBERPUNK THEME
+local function createCyberpunkEffects(parent)
+    for i = 1, 3 do
+        local scanLine = Instance.new("Frame")
+        scanLine.Size = UDim2.new(1, 0, 0, 2)
+        scanLine.Position = UDim2.new(0, 0, i/4, 0)
+        scanLine.BackgroundColor3 = Color3.fromRGB(0,255,255)
+        scanLine.BorderSizePixel = 0
+        scanLine.BackgroundTransparency = 0.8
+        scanLine.Parent = parent
+        themeEffects["scanLine"..i] = scanLine
+        
+        spawn(function()
+            while scanLine.Parent do
+                scanLine.BackgroundTransparency = 0.3
+                scanLine.BackgroundColor3 = Color3.fromRGB(0,255,255)
+                task.wait(0.1)
+                scanLine.BackgroundTransparency = 0.8
+                task.wait(0.5)
+            end
+        end)
+    end
+end
+
+-- GALAXY THEME
+local function createGalaxyEffects(parent)
+    local starContainer = Instance.new("Frame")
+    starContainer.Size = UDim2.new(1, 0, 1, 0)
+    starContainer.BackgroundTransparency = 1
+    starContainer.Parent = parent
+    themeEffects.starContainer = starContainer
+    
+    for i = 1, 40 do
+        local star = Instance.new("Frame")
+        star.Size = UDim2.new(0, math.random(1,3), 0, math.random(1,3))
+        star.Position = UDim2.new(math.random(), 0, math.random(), 0)
+        star.BackgroundColor3 = Color3.fromRGB(255,255,255)
+        star.BackgroundTransparency = 0.5
+        star.BorderSizePixel = 0
+        star.Parent = starContainer
+        Instance.new("UICorner", star).CornerRadius = UDim.new(1,0)
+        themeEffects["star"..i] = star
+        
+        spawn(function()
+            while star.Parent do
+                tween(star, {
+                    BackgroundTransparency = 0.2,
+                    Size = UDim2.new(0, math.random(2,4), 0, math.random(2,4))
+                }, 1)
                 task.wait(math.random(1,3))
+                tween(star, {
+                    BackgroundTransparency = 0.5,
+                    Size = UDim2.new(0, math.random(1,3), 0, math.random(1,3))
+                }, 1)
+                task.wait(math.random(2,4))
+            end
+        end)
+    end
+end
+
+-- RAINBOW THEME
+local function createRainbowEffects(parent)
+    local rainbowColors = {
+        Color3.fromRGB(255, 0, 0),
+        Color3.fromRGB(255, 165, 0),
+        Color3.fromRGB(255, 255, 0),
+        Color3.fromRGB(0, 255, 0),
+        Color3.fromRGB(0, 0, 255),
+        Color3.fromRGB(128, 0, 128)
+    }
+    
+    -- Радужные полосы
+    for i = 1, 6 do
+        local stripe = Instance.new("Frame")
+        stripe.Size = UDim2.new(1, 0, 0, 8)
+        stripe.Position = UDim2.new(0, 0, (i-1)/6, 0)
+        stripe.BackgroundColor3 = rainbowColors[i]
+        stripe.BackgroundTransparency = 0.7
+        stripe.BorderSizePixel = 0
+        stripe.Parent = parent
+        themeEffects["stripe"..i] = stripe
+        
+        spawn(function()
+            local colorIndex = i
+            while stripe.Parent do
+                colorIndex = colorIndex % 6 + 1
+                tween(stripe, {
+                    BackgroundTransparency = 0.5,
+                    BackgroundColor3 = rainbowColors[colorIndex]
+                }, 1, Enum.EasingStyle.Sine)
+                task.wait(1)
+                tween(stripe, {
+                    BackgroundTransparency = 0.7,
+                    BackgroundColor3 = rainbowColors[i]
+                }, 1, Enum.EasingStyle.Sine)
+                task.wait(1)
+            end
+        end)
+    end
+end
+
+-- GOLD THEME
+local function createGoldEffects(parent)
+    local goldContainer = Instance.new("Frame")
+    goldContainer.Size = UDim2.new(1, 0, 1, 0)
+    goldContainer.BackgroundTransparency = 1
+    goldContainer.Parent = parent
+    themeEffects.goldContainer = goldContainer
+    
+    for i = 1, 25 do
+        local goldPiece = Instance.new("Frame")
+        local size = math.random(5, 12)
+        goldPiece.Size = UDim2.new(0, size, 0, size)
+        goldPiece.Position = UDim2.new(math.random(), 0, math.random(), 0)
+        goldPiece.BackgroundColor3 = Color3.fromRGB(
+            200 + math.random(55),
+            150 + math.random(100),
+            math.random(55)
+        )
+        goldPiece.BackgroundTransparency = 0.7
+        goldPiece.BorderSizePixel = 0
+        goldPiece.Parent = goldContainer
+        Instance.new("UICorner", goldPiece).CornerRadius = UDim.new(0,2)
+        themeEffects["goldPiece"..i] = goldPiece
+        
+        spawn(function()
+            while goldPiece.Parent do
+                tween(goldPiece, {
+                    Position = UDim2.new(
+                        goldPiece.Position.X.Scale + math.random(-0.05,0.05),
+                        0,
+                        goldPiece.Position.Y.Scale + math.random(-0.05,0.05),
+                        0
+                    ),
+                    Rotation = 360,
+                    BackgroundTransparency = 0.5
+                }, 3, Enum.EasingStyle.Sine)
+                task.wait(3)
+            end
+        end)
+    end
+end
+
+-- CANDY THEME
+local function createCandyEffects(parent)
+    local candyContainer = Instance.new("Frame")
+    candyContainer.Size = UDim2.new(1, 0, 1, 0)
+    candyContainer.BackgroundTransparency = 1
+    candyContainer.Parent = parent
+    themeEffects.candyContainer = candyContainer
+    
+    local candyEmojis = {"🍬", "🍭", "🍫", "🍡", "🍩", "🍪", "🎂", "🍰", "🧁", "🍦"}
+    
+    for i = 1, 12 do
+        local candy = Instance.new("TextLabel")
+        candy.Size = UDim2.new(0, 25, 0, 25)
+        candy.Position = UDim2.new(math.random() * 0.9, 0, math.random() * 0.9, 0)
+        candy.BackgroundTransparency = 1
+        candy.Text = candyEmojis[math.random(#candyEmojis)]
+        candy.TextScaled = true
+        candy.TextColor3 = Color3.fromRGB(
+            math.random(200,255),
+            math.random(100,200),
+            math.random(200,255)
+        )
+        candy.Font = Enum.Font.Gotham
+        candy.Rotation = math.random(-30,30)
+        candy.Parent = candyContainer
+        themeEffects["candy"..i] = candy
+        
+        spawn(function()
+            while candy.Parent do
+                tween(candy, {
+                    Rotation = candy.Rotation + 360,
+                    Position = UDim2.new(math.random() * 0.9, 0, math.random() * 0.9, 0)
+                }, math.random(3,6), Enum.EasingStyle.Sine)
+                task.wait(math.random(3,6))
+            end
+        end)
+    end
+end
+
+-- FOREST THEME
+local function createForestEffects(parent)
+    local leafContainer = Instance.new("Frame")
+    leafContainer.Size = UDim2.new(1, 0, 1, 0)
+    leafContainer.BackgroundTransparency = 1
+    leafContainer.Parent = parent
+    themeEffects.leafContainer = leafContainer
+    
+    local leafEmojis = {"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"}
+    
+    for i = 1, 50 do
+        local leaf = Instance.new("TextLabel")
+        leaf.Size = UDim2.new(0, 22, 0, 22)
+        leaf.Position = UDim2.new(math.random() * 0.9, 0, math.random() * 0.9, 0)
+        leaf.BackgroundTransparency = 1
+        leaf.Text = leafEmojis[math.random(#leafEmojis)]
+        leaf.TextScaled = true
+        leaf.TextColor3 = Color3.fromRGB(
+            100 + math.random(255),
+            200 + math.random(255),
+            100 + math.random(255)
+        )
+        leaf.Font = Enum.Font.Gotham
+        leaf.Rotation = math.random(-30,30)
+        leaf.Parent = leafContainer
+        themeEffects["leaf"..i] = leaf
+        
+        spawn(function()
+            while leaf.Parent do
+                tween(leaf, {
+                    Rotation = leaf.Rotation + math.random(-20,20),
+                    Position = UDim2.new(
+                        leaf.Position.X.Scale + math.random(-0.05,0.05),
+                        0,
+                        leaf.Position.Y.Scale + math.random(-0.05,0.05),
+                        0
+                    )
+                }, math.random(2,3), Enum.EasingStyle.Sine)
+                task.wait(math.random(2,3))
             end
         end)
     end
@@ -302,7 +709,7 @@ local sub = Instance.new("TextLabel")
 sub.Size = UDim2.new(0.3, -12, 1, -6)
 sub.Position = UDim2.new(0.7, 10, 0, 3)
 sub.BackgroundTransparency = 1
-sub.Text = "v5"
+sub.Text = "v7 - Fixed Themes"
 sub.TextColor3 = Color3.fromRGB(170,170,170)
 sub.TextScaled = true
 sub.Font = Enum.Font.Gotham
@@ -457,75 +864,129 @@ local function safeRemoveHighlight(obj)
     end
 end
 
--- Функция обновления подсветок
-local function updateHighlights()
-    -- Очищаем старые подсветки
-    for obj, highlight in pairs(activeHighlights) do
-        if not obj or not obj.Parent then
-            pcall(function() highlight:Destroy() end)
-            activeHighlights[obj] = nil
+local function updateHighlightForObject(obj, states)
+    if obj:IsA("Model") then
+        if obj.Name == PALLET_NAME and states["Палеты"] then
+            safeSetHighlight(obj, PALLET_COLOR, 
+                highlightSettings.palletFillTransparency, 
+                highlightSettings.palletOutlineTransparency)
+        elseif obj.Name == GEN_NAME and states["Генераторы"] then
+            safeSetHighlight(obj, GEN_COLOR, 
+                highlightSettings.genFillTransparency, 
+                highlightSettings.genOutlineTransparency)
         end
     end
+end
+
+local function updatePlayerHighlight(plr, states)
+    if plr ~= player and plr.Character then
+        local function isKiller(plr)
+            if not plr then return false end
+            if plr:FindFirstChild("Backpack") and plr.Backpack:FindFirstChild("Weapon") then return true end
+            if plr.Character and plr.Character:FindFirstChild("Weapon") then return true end
+            if plr.Character then
+                for _,c in ipairs(plr.Character:GetChildren()) do
+                    if c:IsA("Tool") then return true end
+                end
+            end
+            return false
+        end
+        
+        local killer = isKiller(plr)
+        
+        if killer and states["Убийца"] then
+            safeSetHighlight(plr.Character, KILLER_COLOR, 
+                highlightSettings.killerFillTransparency, 
+                highlightSettings.killerOutlineTransparency)
+        elseif (not killer) and states["Игроки"] then
+            safeSetHighlight(plr.Character, PLAYER_COLOR, 
+                highlightSettings.playerFillTransparency, 
+                highlightSettings.playerOutlineTransparency)
+        else
+            safeRemoveHighlight(plr.Character)
+        end
+    end
+end
+
+local function updateAllHighlights()
+    if isUpdating then return end
+    isUpdating = true
     
-    -- Получаем состояния кнопок
     local states = {}
     for _, btn in ipairs(createdButtons) do
         states[btn.name] = btn.get()
     end
     
-    -- Подсвечиваем палеты
-    if states["Палеты"] then
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("Model") and obj.Name == PALLET_NAME then
-                safeSetHighlight(obj, PALLET_COLOR, 
-                    highlightSettings.palletFillTransparency, 
-                    highlightSettings.palletOutlineTransparency)
+    local anythingEnabled = states["Палеты"] or states["Генераторы"] or states["Игроки"] or states["Убийца"]
+    
+    if anythingEnabled and highlightSettings.enabled then
+        for obj, highlight in pairs(activeHighlights) do
+            if not obj or not obj.Parent then
+                pcall(function() highlight:Destroy() end)
+                activeHighlights[obj] = nil
             end
         end
+        
+        if states["Палеты"] or states["Генераторы"] then
+            for _, obj in ipairs(workspace:GetDescendants()) do
+                updateHighlightForObject(obj, states)
+            end
+        end
+        
+        for _, plr in ipairs(Players:GetPlayers()) do
+            updatePlayerHighlight(plr, states)
+        end
+    else
+        for obj, highlight in pairs(activeHighlights) do
+            pcall(function() highlight:Destroy() end)
+        end
+        activeHighlights = {}
     end
     
-    -- Подсвечиваем генераторы
-    if states["Генераторы"] then
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("Model") and obj.Name == GEN_NAME then
-                safeSetHighlight(obj, GEN_COLOR, 
-                    highlightSettings.genFillTransparency, 
-                    highlightSettings.genOutlineTransparency)
-            end
-        end
-    end
-    
-    -- Подсвечиваем игроков
-    local function isKiller(plr)
-        if not plr then return false end
-        if plr:FindFirstChild("Backpack") and plr.Backpack:FindFirstChild("Weapon") then return true end
-        if plr.Character and plr.Character:FindFirstChild("Weapon") then return true end
-        if plr.Character then
-            for _,c in ipairs(plr.Character:GetChildren()) do
-                if c:IsA("Tool") then return true end
-            end
-        end
-        return false
-    end
-    
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= player and plr.Character then
-            local killer = isKiller(plr)
-            
-            if killer and states["Убийца"] then
-                safeSetHighlight(plr.Character, KILLER_COLOR, 
-                    highlightSettings.killerFillTransparency, 
-                    highlightSettings.killerOutlineTransparency)
-            elseif (not killer) and states["Игроки"] then
-                safeSetHighlight(plr.Character, PLAYER_COLOR, 
-                    highlightSettings.playerFillTransparency, 
-                    highlightSettings.playerOutlineTransparency)
-            else
-                safeRemoveHighlight(plr.Character)
-            end
-        end
-    end
+    isUpdating = false
 end
+
+workspace.DescendantAdded:Connect(function(obj)
+    local states = {}
+    for _, btn in ipairs(createdButtons) do
+        states[btn.name] = btn.get()
+    end
+    
+    if (states["Палеты"] or states["Генераторы"]) and highlightSettings.enabled then
+        updateHighlightForObject(obj, states)
+    end
+end)
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function(char)
+        task.wait(0.1)
+        local states = {}
+        for _, btn in ipairs(createdButtons) do
+            states[btn.name] = btn.get()
+        end
+        
+        if (states["Игроки"] or states["Убийца"]) and highlightSettings.enabled then
+            updatePlayerHighlight(plr, states)
+        end
+    end)
+    
+    if plr.Character then
+        local states = {}
+        for _, btn in ipairs(createdButtons) do
+            states[btn.name] = btn.get()
+        end
+        
+        if (states["Игроки"] or states["Убийца"]) and highlightSettings.enabled then
+            updatePlayerHighlight(plr, states)
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    if plr.Character then
+        safeRemoveHighlight(plr.Character)
+    end
+end)
 
 -- ========== NIGHT MODE FUNCTION ==========
 local function toggleNightMode()
@@ -624,7 +1085,6 @@ local function enableBinding(btn, label)
     end)
 end
 
--- Создаем логику для переключателей
 local function createToggleLogic(btn, bindLabel, name)
     local state = false
     
@@ -642,7 +1102,6 @@ local function createToggleLogic(btn, bindLabel, name)
         state = not state
         updateVisual()
         
-        -- Обработка специальных функций
         if name == "Коллизия" then
             if player.Character then
                 for _, part in ipairs(player.Character:GetDescendants()) do
@@ -665,8 +1124,7 @@ local function createToggleLogic(btn, bindLabel, name)
             toggleNightMode()
         end
         
-        -- Обновляем подсветки
-        updateHighlights()
+        updateAllHighlights()
     end)
     
     enableBinding(btn, bindLabel)
@@ -683,7 +1141,6 @@ local function createToggleLogic(btn, bindLabel, name)
     updateVisual()
 end
 
--- Создаем логику для всех кнопок
 createToggleLogic(palletBtn, palletBind, "Палеты")
 createToggleLogic(genBtn, genBind, "Генераторы")
 createToggleLogic(playersBtn, playersBind, "Игроки")
@@ -777,7 +1234,7 @@ end)
 
 -- ========== SETTINGS FRAME ==========
 local settingsFrame = Instance.new("Frame")
-settingsFrame.Size = UDim2.new(0, 280, 0, 250)
+settingsFrame.Size = UDim2.new(0, 280, 0, 320)
 settingsFrame.Position = UDim2.new(0, 10, 0, 1000)
 settingsFrame.BackgroundColor3 = Color3.fromRGB(14,14,16)
 settingsFrame.BorderSizePixel = 0
@@ -789,19 +1246,121 @@ local sTitle = Instance.new("TextLabel")
 sTitle.Size = UDim2.new(1, -16, 0, 28)
 sTitle.Position = UDim2.new(0, 8, 0, 8)
 sTitle.BackgroundTransparency = 1
-sTitle.Text = "Настройки и Темы"
+sTitle.Text = "Темы (12 вариантов)"
 sTitle.TextColor3 = Color3.fromRGB(230,230,230)
 sTitle.TextScaled = true
 sTitle.Font = Enum.Font.GothamBold
 sTitle.Parent = settingsFrame
 
--- Theme grid
 local themeGrid = Instance.new("Frame")
-themeGrid.Size = UDim2.new(1, -16, 0, 130)
+themeGrid.Size = UDim2.new(1, -16, 0, 240)
 themeGrid.Position = UDim2.new(0, 8, 0, 40)
 themeGrid.BackgroundTransparency = 1
 themeGrid.Parent = settingsFrame
 
+-- Функция для применения темы с очисткой предыдущих эффектов
+local function applyTheme(themeName, themeFunc)
+    -- Полная очистка предыдущих эффектов
+    clearThemeEffects()
+    
+    currentTheme = themeName
+    
+    -- Запускаем эффекты новой темы
+    if themeFunc then
+        themeFunc(frame)
+    end
+    
+    -- Применяем основные цвета темы
+    if themeName == "Dark" then
+        frame.BackgroundColor3 = Color3.fromRGB(18,18,20)
+        contentBg.BackgroundColor3 = Color3.fromRGB(22,22,24)
+        headerBg.BackgroundColor3 = Color3.fromRGB(28,28,30)
+        title.TextColor3 = Color3.fromRGB(230,230,230)
+        sub.TextColor3 = Color3.fromRGB(170,170,170)
+    elseif themeName == "Light" then
+        frame.BackgroundColor3 = Color3.fromRGB(245,245,245)
+        contentBg.BackgroundColor3 = Color3.fromRGB(240,240,240)
+        headerBg.BackgroundColor3 = Color3.fromRGB(250,250,250)
+        title.TextColor3 = Color3.fromRGB(30,30,30)
+        sub.TextColor3 = Color3.fromRGB(80,80,80)
+    elseif themeName == "Neon" then
+        frame.BackgroundColor3 = Color3.fromRGB(30,4,40)
+        contentBg.BackgroundColor3 = Color3.fromRGB(22,12,30)
+        headerBg.BackgroundColor3 = Color3.fromRGB(50,20,60)
+        title.TextColor3 = Color3.fromRGB(255,220,255)
+        sub.TextColor3 = Color3.fromRGB(200,150,200)
+    elseif themeName == "Ocean" then
+        frame.BackgroundColor3 = Color3.fromRGB(10,20,40)
+        contentBg.BackgroundColor3 = Color3.fromRGB(15,25,45)
+        headerBg.BackgroundColor3 = Color3.fromRGB(20,40,70)
+        title.TextColor3 = Color3.fromRGB(180,220,255)
+        sub.TextColor3 = Color3.fromRGB(120,180,220)
+    elseif themeName == "Sunset" then
+        frame.BackgroundColor3 = Color3.fromRGB(40,20,10)
+        contentBg.BackgroundColor3 = Color3.fromRGB(50,30,20)
+        headerBg.BackgroundColor3 = Color3.fromRGB(70,40,25)
+        title.TextColor3 = Color3.fromRGB(255,200,180)
+        sub.TextColor3 = Color3.fromRGB(220,160,140)
+    elseif themeName == "Matrix" then
+        frame.BackgroundColor3 = Color3.fromRGB(10,20,10)
+        contentBg.BackgroundColor3 = Color3.fromRGB(15,30,15)
+        headerBg.BackgroundColor3 = Color3.fromRGB(20,40,20)
+        title.TextColor3 = Color3.fromRGB(180,255,180)
+        sub.TextColor3 = Color3.fromRGB(120,220,120)
+    elseif themeName == "Forest" then
+        frame.BackgroundColor3 = Color3.fromRGB(10,30,15)
+        contentBg.BackgroundColor3 = Color3.fromRGB(15,40,20)
+        headerBg.BackgroundColor3 = Color3.fromRGB(20,50,25)
+        title.TextColor3 = Color3.fromRGB(200,255,200)
+        sub.TextColor3 = Color3.fromRGB(150,200,150)
+    elseif themeName == "Cyberpunk" then
+        frame.BackgroundColor3 = Color3.fromRGB(10,5,20)
+        contentBg.BackgroundColor3 = Color3.fromRGB(15,10,25)
+        headerBg.BackgroundColor3 = Color3.fromRGB(20,15,35)
+        title.TextColor3 = Color3.fromRGB(200,255,255)
+        sub.TextColor3 = Color3.fromRGB(150,200,200)
+    elseif themeName == "Galaxy" then
+        frame.BackgroundColor3 = Color3.fromRGB(5,5,20)
+        contentBg.BackgroundColor3 = Color3.fromRGB(10,10,30)
+        headerBg.BackgroundColor3 = Color3.fromRGB(15,15,40)
+        title.TextColor3 = Color3.fromRGB(200,200,255)
+        sub.TextColor3 = Color3.fromRGB(150,150,220)
+    elseif themeName == "Fire" then
+        frame.BackgroundColor3 = Color3.fromRGB(20,10,5)
+        contentBg.BackgroundColor3 = Color3.fromRGB(30,15,10)
+        headerBg.BackgroundColor3 = Color3.fromRGB(40,20,15)
+        title.TextColor3 = Color3.fromRGB(255,200,150)
+        sub.TextColor3 = Color3.fromRGB(220,150,100)
+    elseif themeName == "Lava" then
+        frame.BackgroundColor3 = Color3.fromRGB(30,10,5)
+        contentBg.BackgroundColor3 = Color3.fromRGB(40,15,10)
+        headerBg.BackgroundColor3 = Color3.fromRGB(50,20,15)
+        title.TextColor3 = Color3.fromRGB(255,150,100)
+        sub.TextColor3 = Color3.fromRGB(220,120,80)
+    elseif themeName == "Rainbow" then
+        frame.BackgroundColor3 = Color3.fromRGB(50,50,50)
+        contentBg.BackgroundColor3 = Color3.fromRGB(60,60,60)
+        headerBg.BackgroundColor3 = Color3.fromRGB(70,70,70)
+        title.TextColor3 = Color3.fromRGB(255,255,255)
+        sub.TextColor3 = Color3.fromRGB(200,200,200)
+    elseif themeName == "Gold" then
+        frame.BackgroundColor3 = Color3.fromRGB(40,30,10)
+        contentBg.BackgroundColor3 = Color3.fromRGB(50,40,15)
+        headerBg.BackgroundColor3 = Color3.fromRGB(60,50,20)
+        title.TextColor3 = Color3.fromRGB(255,215,0)
+        sub.TextColor3 = Color3.fromRGB(220,185,0)
+    elseif themeName == "Candy" then
+        frame.BackgroundColor3 = Color3.fromRGB(255,200,220)
+        contentBg.BackgroundColor3 = Color3.fromRGB(245,190,210)
+        headerBg.BackgroundColor3 = Color3.fromRGB(235,180,200)
+        title.TextColor3 = Color3.fromRGB(100,20,60)
+        sub.TextColor3 = Color3.fromRGB(120,40,80)
+    end
+    
+    showNotification("Тема установлена: " .. themeName, 2)
+end
+
+-- Функция для создания кнопки темы
 local function createThemeButton(text, color, col, row, themeName, themeFunc)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(0.23, -2, 0, 28)
@@ -816,75 +1375,30 @@ local function createThemeButton(text, color, col, row, themeName, themeFunc)
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0,6)
     
     btn.MouseButton1Click:Connect(function()
-        currentTheme = themeName
-        clearThemeEffects()
-        
-        if themeFunc then
-            themeFunc(frame)
-        end
-        
-        -- Применяем основные цвета темы
-        if themeName == "Dark" then
-            frame.BackgroundColor3 = Color3.fromRGB(18,18,20)
-            contentBg.BackgroundColor3 = Color3.fromRGB(22,22,24)
-            headerBg.BackgroundColor3 = Color3.fromRGB(28,28,30)
-        elseif themeName == "Light" then
-            frame.BackgroundColor3 = Color3.fromRGB(245,245,245)
-            contentBg.BackgroundColor3 = Color3.fromRGB(240,240,240)
-            headerBg.BackgroundColor3 = Color3.fromRGB(250,250,250)
-            title.TextColor3 = Color3.fromRGB(30,30,30)
-            sub.TextColor3 = Color3.fromRGB(80,80,80)
-        elseif themeName == "Neon" then
-            frame.BackgroundColor3 = Color3.fromRGB(30,4,40)
-            contentBg.BackgroundColor3 = Color3.fromRGB(22,12,30)
-            headerBg.BackgroundColor3 = Color3.fromRGB(50,20,60)
-            title.TextColor3 = Color3.fromRGB(255,220,255)
-            sub.TextColor3 = Color3.fromRGB(200,150,200)
-        elseif themeName == "Ocean" then
-            frame.BackgroundColor3 = Color3.fromRGB(10,20,40)
-            contentBg.BackgroundColor3 = Color3.fromRGB(15,25,45)
-            headerBg.BackgroundColor3 = Color3.fromRGB(20,40,70)
-            title.TextColor3 = Color3.fromRGB(180,220,255)
-            sub.TextColor3 = Color3.fromRGB(120,180,220)
-        elseif themeName == "Sunset" then
-            frame.BackgroundColor3 = Color3.fromRGB(40,20,10)
-            contentBg.BackgroundColor3 = Color3.fromRGB(50,30,20)
-            headerBg.BackgroundColor3 = Color3.fromRGB(70,40,25)
-            title.TextColor3 = Color3.fromRGB(255,200,180)
-            sub.TextColor3 = Color3.fromRGB(220,160,140)
-        elseif themeName == "Matrix" then
-            frame.BackgroundColor3 = Color3.fromRGB(10,20,10)
-            contentBg.BackgroundColor3 = Color3.fromRGB(15,30,15)
-            headerBg.BackgroundColor3 = Color3.fromRGB(20,40,20)
-            title.TextColor3 = Color3.fromRGB(180,255,180)
-            sub.TextColor3 = Color3.fromRGB(120,220,120)
-        elseif themeName == "Cyberpunk" then
-            frame.BackgroundColor3 = Color3.fromRGB(10,5,20)
-            contentBg.BackgroundColor3 = Color3.fromRGB(15,10,25)
-            headerBg.BackgroundColor3 = Color3.fromRGB(20,15,35)
-            title.TextColor3 = Color3.fromRGB(200,255,255)
-            sub.TextColor3 = Color3.fromRGB(150,200,200)
-        elseif themeName == "Forest" then
-            frame.BackgroundColor3 = Color3.fromRGB(10,30,15)
-            contentBg.BackgroundColor3 = Color3.fromRGB(15,40,20)
-            headerBg.BackgroundColor3 = Color3.fromRGB(20,50,25)
-            title.TextColor3 = Color3.fromRGB(200,255,200)
-            sub.TextColor3 = Color3.fromRGB(150,200,150)
-        end
+        applyTheme(themeName, themeFunc)
     end)
     
     return btn
 end
 
--- Создаем кнопки тем (4x4 сетка)
+-- Создаем 12 тем (4x3 сетка)
+-- Ряд 1
 createThemeButton("Dark", Color3.fromRGB(40,40,40), 1, 1, "Dark")
 createThemeButton("Light", Color3.fromRGB(100,100,120), 2, 1, "Light")
 createThemeButton("Neon", Color3.fromRGB(100,40,120), 3, 1, "Neon", createNeonEffects)
 createThemeButton("Ocean", Color3.fromRGB(30,80,120), 4, 1, "Ocean", createOceanEffects)
-createThemeButton("Sunset", Color3.fromRGB(120,60,40), 1, 2, "Sunset")
-createThemeButton("Matrix", Color3.fromRGB(40,120,60), 2, 2, "Matrix", createMatrixEffects)
-createThemeButton("Forest", Color3.fromRGB(40,100,60), 3, 2, "Forest")
-createThemeButton("Cyber", Color3.fromRGB(80,40,120), 4, 2, "Cyberpunk")
+
+-- Ряд 2
+createThemeButton("Matrix", Color3.fromRGB(40,120,60), 1, 2, "Matrix", createMatrixEffects)
+createThemeButton("Cyber", Color3.fromRGB(80,40,120), 2, 2, "Cyberpunk", createCyberpunkEffects)
+createThemeButton("Galaxy", Color3.fromRGB(20,20,80), 3, 2, "Galaxy", createGalaxyEffects)
+createThemeButton("Forest", Color3.fromRGB(40,100,60), 4, 2, "Forest", createForestEffects)
+
+-- Ряд 3
+createThemeButton("Fire", Color3.fromRGB(120,40,20), 1, 3, "Fire", createFireEffects)
+createThemeButton("Lava", Color3.fromRGB(150,50,10), 2, 3, "Lava", createLavaEffects)
+createThemeButton("Rainbow", Color3.fromRGB(255,0,0), 3, 3, "Rainbow", createRainbowEffects)
+createThemeButton("Candy", Color3.fromRGB(255,100,180), 4, 3, "Candy", createCandyEffects)
 
 local settingsOpen = false
 settingsBtn.MouseButton1Click:Connect(function()
@@ -980,7 +1494,7 @@ local function createHighlightSlider(settingName, displayName)
         highlightSettings[settingName] = value
         valueLabel.Text = string.format("%.1f", value)
         fill.Size = UDim2.new(value, 0, 1, 0)
-        updateHighlights()
+        updateAllHighlights()
     end
     
     local sliderBtn = Instance.new("TextButton")
@@ -1010,7 +1524,6 @@ local function createHighlightSlider(settingName, displayName)
     return container
 end
 
--- Создаем слайдеры
 createHighlightSlider("palletFillTransparency", "Палеты: прозрачность")
 createHighlightSlider("palletOutlineTransparency", "Палеты: контур")
 createHighlightSlider("genFillTransparency", "Генераторы: прозрачность")
@@ -1020,7 +1533,6 @@ createHighlightSlider("playerOutlineTransparency", "Игроки: контур")
 createHighlightSlider("killerFillTransparency", "Убийца: прозрачность")
 createHighlightSlider("killerOutlineTransparency", "Убийца: контур")
 
--- Кнопка включения/выключения
 local toggleAllBtn = Instance.new("TextButton")
 toggleAllBtn.Size = UDim2.new(1, -16, 0, 32)
 toggleAllBtn.Position = UDim2.new(0, 8, 1, -40)
@@ -1036,15 +1548,7 @@ toggleAllBtn.MouseButton1Click:Connect(function()
     highlightSettings.enabled = not highlightSettings.enabled
     toggleAllBtn.BackgroundColor3 = highlightSettings.enabled and Color3.fromRGB(60,120,60) or Color3.fromRGB(120,60,60)
     toggleAllBtn.Text = highlightSettings.enabled and "Подсветки: ВКЛ" or "Подсветки: ВЫКЛ"
-    
-    if not highlightSettings.enabled then
-        for obj, highlight in pairs(activeHighlights) do
-            pcall(function() highlight:Destroy() end)
-        end
-        activeHighlights = {}
-    else
-        updateHighlights()
-    end
+    updateAllHighlights()
 end)
 
 local highlightSettingsOpen = false
@@ -1109,19 +1613,10 @@ end)
 -- ========== INITIALIZATION ==========
 refreshTPList()
 
--- Автоматическое обновление подсветок при изменениях
-spawn(function()
-    while gui and gui.Parent do
-        updateHighlights()
-        task.wait(0.5)
-    end
-end)
-
--- Обновление списка телепорта при изменениях
 Players.PlayerAdded:Connect(refreshTPList)
 Players.PlayerRemoving:Connect(refreshTPList)
 
-print("Stylish FinderMenu v5 - WORKING VERSION loaded successfully!")
+print("Stylish FinderMenu v7 - FIXED THEMES loaded successfully!")
 
 -- MovementMenu v5 — CUSTOMIZABLE DASH WITH SETTINGS
 -- Полная настройка даша + правильное восстановление скорости
